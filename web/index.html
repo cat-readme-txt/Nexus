@@ -16,6 +16,8 @@
     <div class="brand"><img src="./assets/game-icon.png" alt="" width="32" height="32"><span>Nexus</span></div>
     <nav aria-label="Game controls">
       <button class="quiet" id="rules-button" type="button">How to play</button>
+      <button class="quiet" id="settings-button" type="button">Settings</button>
+      <button class="quiet" id="terminal-button" type="button" hidden>Testing terminal</button>
       <button class="quiet" id="review-button" type="button" hidden>Match review</button>
       <button class="quiet" id="menu-button" type="button" hidden>Leave match</button>
     </nav>
@@ -177,11 +179,8 @@
             <p class="command-hint" id="fabrication-hint" hidden></p>
           </div>
           <div class="orders-buttons" id="tile-orders">
-            <button type="button" id="strike" class="primary" hidden>Strike <span id="strike-cost"></span></button>
-            <button type="button" id="withdraw" hidden>Withdraw <span>0 TV</span></button>
-            <button type="button" id="ascension-strike" aria-pressed="false" hidden>Ascension strike <span id="ascension-strike-cost"></span></button>
-            <button type="button" id="occupy" hidden>Occupy <span id="occupy-cost"></span></button>
-            <button type="button" id="fire" aria-pressed="false" hidden>Obelisk fire <span>1 TV</span></button>
+            <button type="button" id="occupy" hidden><strong id="occupy-label">Occupy</strong> <span id="occupy-cost"></span></button>
+            <button type="button" id="fire" aria-pressed="false" hidden>Obelisk fire <span id="fire-cost">1 TV</span></button>
             <button type="button" id="fortify" hidden>Fortify <span>2 TV</span></button>
             <button type="button" id="phase-jump" aria-pressed="false" hidden>Phase jump <span>2 TV</span></button>
           </div>
@@ -209,6 +208,44 @@
     </aside>
   </main>
 
+  <dialog id="settings-dialog" aria-labelledby="settings-title">
+    <div class="dialog-heading"><h2 id="settings-title">Settings</h2><form method="dialog"><button class="quiet" value="close">Close</button></form></div>
+    <div class="settings-controls">
+      <label class="volume-control" for="effects-volume">
+        <span>Sound effects</span><input id="effects-volume" type="range" min="0" max="100"><output id="effects-level" for="effects-volume"></output>
+      </label>
+      <label class="volume-control" for="music-volume">
+        <span>Background music</span><input id="music-volume" type="range" min="0" max="100"><output id="music-level" for="music-volume"></output>
+      </label>
+      <label class="design-control" for="proxy-design">
+        <span>Proxy design</span>
+        <select id="proxy-design">
+          <option value="drone">Drone</option>
+          <option value="classic">Classic shield</option>
+        </select>
+      </label>
+      <div class="test-setting">
+        <label><input type="checkbox" id="enable-terminal" aria-describedby="terminal-help"> Enable testing terminal</label>
+        <p id="terminal-help" class="muted">After setup, Testing terminal appears in the top bar during each active pass-and-play turn.</p>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="terminal-dialog" aria-labelledby="terminal-title">
+    <div class="dialog-heading">
+      <h2 id="terminal-title">Testing terminal</h2>
+      <p id="terminal-timer" class="augment-timer" aria-label="Time remaining"></p>
+      <form method="dialog"><button class="quiet" value="close">Close</button></form>
+    </div>
+    <p id="terminal-side" class="muted"></p>
+    <div id="terminal-output" role="log" aria-label="Command output" class="terminal-output"></div>
+    <form id="terminal-form" class="terminal-form">
+      <label class="visually-hidden" for="terminal-input">Testing command</label>
+      <input id="terminal-input" type="text" maxlength="100" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="add TV 100" required autofocus>
+      <button class="primary" type="submit">Run</button>
+    </form>
+  </dialog>
+
   <dialog id="rules-dialog" aria-labelledby="rules-title">
     <div class="dialog-heading"><h2 id="rules-title">How to play</h2><form method="dialog"><button class="quiet" value="close">Close</button></form></div>
     <div class="rules-content">
@@ -219,19 +256,20 @@
       </details>
       <p><strong>TV stands for teravolts.</strong> TV is the game's energy budget for orders. Base recharge is 3 TV plus 1 TV per active Proxy, up to 30 TV. Spend TV before the three-minute turn ends. Unused TV is lost.</p>
       <dl class="rule-actions">
-        <div><dt>Move · 1 TV</dt><dd>Enter an adjacent hex. Enemy shield borders block movement.</dd></div>
-        <div><dt>Strike · base cost 2 TV</dt><dd>Move onto an enemy hex with enough TV left to fight, then choose Strike to attack the enemy sharing that hex. You can withdraw for free. Ending the turn or running out of time sends your Proxy back to its starting hex.</dd></div>
+        <div><dt>Move · 1 TV</dt><dd>Enter an adjacent hex. Landing on an enemy Proxy removes it immediately and earns one reserve Proxy. Enemy shields and your own Proxies block movement.</dd></div>
         <div><dt>Deploy · base cost 1 TV</dt><dd>Place a reserve Proxy on a free hex in your Cradle. It can act, power nodes, and generate TV starting on your next turn.</dd></div>
       </dl>
       <dl class="rule-nodes">
         <div><img src="./assets/nexus.png" alt=""><div><dt>Nexus</dt><dd>Enter the enemy Nexus to win.</dd></div></div>
         <div><img src="./assets/vanguard.png" alt=""><div><dt>Vanguard</dt><dd>A friendly Proxy powers the Nexus shield from here. It falls if the enemy controls all eight of your Obelisks.</dd></div></div>
-        <div><img src="./assets/sentinel.png" alt=""><div><dt>Sentinel Obelisk</dt><dd>Occupy for 3 TV to shut down enemy shields or restore your own. Fire from your own staffed Obelisk for 1 TV to hit an enemy up to two steps away.</dd></div></div>
-        <div><img src="./assets/aegis.png" alt=""><div><dt>Aegis</dt><dd>Enter with an active Proxy to claim it and disable its enemy shield. Friendly control restores the shield.</dd></div></div>
+        <div><img src="./assets/sentinel.png" alt=""><div><dt>Sentinel Obelisk</dt><dd>Stand on it and select Capture for 3 TV (4 for Veyari) to shut down its borders or restore your own. Obelisk fire costs 1 TV (2 for Directorate) and reaches up to two hexes.</dd></div></div>
+        <div><img src="./assets/aegis.png" alt=""><div><dt>Aegis</dt><dd>Stand on it and select Capture for 0 TV to shut down its borders or restore your own.</dd></div></div>
         <div><img src="./assets/deposit.png" alt=""><div><dt>Deposit</dt><dd>Occupy for 3 TV to add one Proxy to your reserve.</dd></div></div>
       </dl>
+      <p>Occupied special hexes show an inlay around the Proxy. Look for a crown on a Nexus, side brackets on a Vanguard, pointed chevrons on an Obelisk, flat bars on an Aegis, a gold ring on a Deposit, or a teal diamond on a cache. Select any hex to see its rules and occupants.</p>
       <p>Fabricate a reserve Proxy for 2 TV with fewer than two active Proxies, once every three turns. Salvage caches surface in Turbulence every third round. An active Proxy can recover one for 2 TV.</p>
-      <p>A staffed Aegis can deploy a reserve Proxy to an open neighboring hex for 1 TV. Its shields drop until your next turn. Keep a Proxy on a newly claimed node until your next turn to secure control.</p>
+      <p>Aegis and Obelisk borders start powered. Each node powers the borders it sends toward the enemy Nexus. Capture shuts down those borders until the original side recaptures the node. Select a generator to see its linked borders.</p>
+      <p>A staffed Aegis can deploy a reserve Proxy to an open neighboring hex for 1 TV. Its shields drop until your next turn. Keep a Proxy on a newly occupied Deposit until your next turn to secure control.</p>
       <p>Species abilities are explained when you choose. Board effects are visible, and the match review reveals both picks.</p>
       <p>Hold a Deposit with an active Proxy to buy augments. Use a purchased augment on one of your turns, even if you later lose the Deposit.</p>
       <p class="muted">Use Q, W, E, A, S, and D to move around the board with a keyboard. Enter selects a hex.</p>

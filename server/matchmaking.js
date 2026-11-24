@@ -1,4 +1,4 @@
-import { advanceClock, applyAction, concedeGame, createGame } from "../web/rules.js";
+import { advanceClock, applyAction, concedeGame, createGame, restoreLegacyMove } from "../web/rules.js";
 
 const QUEUE_LEASE = 90_000;
 const INVITE_LEASE = 20 * 60_000;
@@ -92,7 +92,10 @@ export function processMatch(lobby, request, now) {
     }
   }
 
-  if (room?.game && advanceClock(room.game, now)) changed = true;
+  if (room?.game) {
+    if (restoreLegacyMove(room.game)) changed = true;
+    if (advanceClock(room.game, now)) changed = true;
+  }
 
   const side = room?.seats.blue === token ? "blue" : "red";
   if (op === "concede" && room?.game && room.code === request.room && room.game.phase !== "finished") {

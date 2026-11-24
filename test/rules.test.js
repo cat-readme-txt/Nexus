@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { board, cradles, nexus, nodes, sentinels, tiles, vanguards, walls } from "../web/board.js";
+import { board, cradles, nexus, nodes, otherSide, sentinels, tiles, vanguards, walls } from "../web/board.js";
 import {
   advanceClock, applyAction, baseShieldActive, createGame, nodeController, placementActions,
-  obeliskRange, proxiesAt, proxyActions, readyProxy, TURN_SECONDS, wallActive,
+  obeliskRange, proxyActions, readyProxy, TURN_SECONDS, wallActive,
 } from "../web/rules.js";
 
 const cost = (type, from, to) => ({ type, from, to });
@@ -30,6 +30,11 @@ test("the competition layout preserves playable hexes, nodes, and adjacent shiel
   assert.equal(nodes.filter(({ node }) => node.type === "deposit").length, 9);
   assert.deepEqual([sentinels.blue.length, sentinels.red.length], [8, 8]);
   assert.equal(walls.length, 251);
+  const game = createGame({ now: start });
+  const center = (id) => {
+    const { column, row } = tiles.get(id);
+    return [3 * column, 2 * row - column % 2];
+  };
   for (const tile of board) {
     for (const neighbor of tile.neighbors.filter((id) => id !== null)) {
       assert(tiles.get(neighbor).neighbors.includes(tile.id));
@@ -37,6 +42,15 @@ test("the competition layout preserves playable hexes, nodes, and adjacent shiel
   }
   for (const wall of walls) {
     assert(tiles.get(wall.from).neighbors.includes(wall.to));
+    assert.equal(tiles.get(wall.source).node.home, wall.side);
+    assert(wallActive(game, wall));
+    const home = center(nexus[wall.side]);
+    const enemy = center(nexus[otherSide(wall.side)]);
+    const project = (id) => {
+      const [x, y] = center(id);
+      return x * (enemy[0] - home[0]) + 3 * y * (enemy[1] - home[1]);
+    };
+    assert(project(wall.from) + project(wall.to) > 2 * project(wall.source));
   }
 });
 
@@ -86,69 +100,122 @@ test("timeouts complete setup, expire turns and reject actions at the deadline",
   assert.equal(game.players.red.tv, 6);
 });
 
-test("entering an enemy hex and striking there are separate orders", () => {
+test("one Move captures an enemy for exactly 1 TV, including a fortified enemy", () => {
   const game = playGame();
   const from = 162;
   const to = 163;
+  game.speciesPicks = { blue: "directorate", red: "keth" };
   proxy(game, from, "blue");
-  proxy(game, to, "red");
-  game.players.blue.tv = 2;
+  proxy(game, to, "blue");
   assert.equal(applyAction(game, "blue", cost("move", from, to), start), "That action is unavailable.");
-  game.players.blue.tv = 3;
+  proxy(game, to, "red");
+  game.proxies[to].fortified = true;
+  game.players.blue.tv = 0;
+  assert.equal(applyAction(game, "blue", cost("move", from, to), start), "That action is unavailable.");
+  game.players.blue.tv = 1;
   assert.equal(applyAction(game, "blue", cost("strike", from, to), start), "That action is unavailable.");
+  assert.equal(applyAction(game, "blue", cost("withdraw", from, to), start), "That action is unavailable.");
   assert.equal(applyAction(game, "blue", cost("move", from, to), start), null);
-  assert.equal(game.players.blue.tv, 2);
-  assert.deepEqual(proxiesAt(game, to).map(({ side }) => side), ["red", "blue"]);
-  assert.equal(game.players.blue.reserve, 0);
-  assert.deepEqual(game.impacts, []);
-  assert.match(applyAction(game, "blue", { type: "fabricate" }, start), /contested hex/);
-  assert.equal(applyAction(game, "blue", cost("strike", to, to), start), null);
   assert.equal(game.proxies[to].side, "blue");
   assert.equal(game.proxies[from], undefined);
   assert.equal(game.players.blue.reserve, 1);
   assert.equal(game.activeSide, "red");
-  assert.equal(game.engagement, null);
+  assert.equal(game.stats.blue.tvSpent, 1);
   assert.equal(game.stats.blue.moveOrders, 1);
-  assert.equal(game.stats.blue.strikeOrders, 1);
-  assert.deepEqual(game.impacts, [{ revision: 2, tiles: [to] }]);
+  assert.equal(game.stats.blue.moveCaptures, 1);
+  assert.equal(game.stats.red.lost, 1);
+  assert.equal(game.stats.red.hitsAbsorbed, undefined);
+  assert.deepEqual(game.impacts, [{ revision: 1, tiles: [to] }]);
+  assert(game.soundEvents.some(({ revision, cue }) => revision === 1 && cue === "capture"));
 });
 
-test("withdrawing or running out of time returns the attacker without a strike", () => {
+test("a capture persists when the player runs out of time", () => {
   const game = playGame();
   const from = 162;
   const to = 163;
   proxy(game, from, "blue");
   proxy(game, to, "red");
   assert.equal(applyAction(game, "blue", cost("move", from, to), start), null);
-  assert.equal(applyAction(game, "blue", cost("withdraw", to, from), start), null);
   assert.equal(game.players.blue.tv, 5);
-  assert.equal(game.proxies[from].side, "blue");
-  assert.equal(applyAction(game, "blue", cost("move", from, to), start), null);
   assert.equal(advanceClock(game, game.deadline), true);
-  assert.equal(game.engagement, null);
-  assert.equal(game.proxies[from].side, "blue");
-  assert.equal(game.proxies[to].side, "red");
-  assert.equal(game.players.blue.reserve, 0);
-  assert.equal(game.stats.blue.withdrawals, 2);
-  assert.deepEqual(game.impacts, []);
+  assert.equal(game.activeSide, "red");
+  assert.equal(game.proxies[from], undefined);
+  assert.equal(game.proxies[to].side, "blue");
+  assert.equal(game.players.blue.reserve, 1);
+  assert.deepEqual(game.impacts, [{ revision: 1, tiles: [to] }]);
 });
 
-test("Aegis claims are free and a deposit costs 3 TV even if the claim is later denied", () => {
+test("an Aegis capture shuts down only its forward borders and persists until recapture", () => {
   const game = playGame();
-  const aegis = nodes.find(({ node }) => node.type === "aegis" && node.home === "red");
-  const from = aegis.neighbors.find((id) => id !== null);
-  proxy(game, from, "blue");
-  assert.equal(applyAction(game, "blue", cost("move", from, aegis.id), start), null);
-  assert.equal(nodeController(game, aegis.id), "blue");
-  assert.equal(game.players.blue.tv, 5);
-  const wall = walls.find(({ sources }) => sources.length === 1 && sources[0] === aegis.id);
-  assert.equal(wallActive(game, wall), false);
+  const aegis = 126; // Red's B6 Aegis.
+  const from = 101;
+  const outward = walls.filter(({ source }) => source === aegis);
+  const homeward = walls.find(({ from, to }) => from === aegis && to === 151);
+  assert(outward.length > 0);
+  assert.equal(homeward.source, 176);
 
+  proxy(game, from, "blue");
+  assert.equal(applyAction(game, "blue", cost("move", from, aegis), start), null);
+  assert.equal(nodeController(game, aegis), "red");
+  assert(outward.every((wall) => wallActive(game, wall)));
+  const capture = proxyActions(game, aegis).find(({ type }) => type === "occupy");
+  assert.equal(capture.cost, 0);
+  assert.equal(applyAction(game, "blue", capture, start), null);
+  assert.equal(game.players.blue.tv, 5);
+  assert(outward.every((wall) => !wallActive(game, wall)));
+  assert(wallActive(game, homeward));
+  assert.equal(applyAction(game, "blue", cost("move", aegis, from), start), null);
+  assert.equal(applyAction(game, "blue", { type: "end" }, start), null);
+  assert.equal(applyAction(game, "red", { type: "end" }, start), null);
+  assert.equal(nodeController(game, aegis), "blue");
+  assert(outward.every((wall) => !wallActive(game, wall)));
+  assert.equal(applyAction(game, "blue", { type: "end" }, start), null);
+
+  proxy(game, 102, "red");
+  assert.equal(applyAction(game, "red", cost("move", 102, aegis), start), null);
+  assert(outward.every((wall) => !wallActive(game, wall)));
+  assert.equal(applyAction(game, "red", cost("occupy", aegis, aegis), start), null);
+  assert.equal(nodeController(game, aegis), "red");
+  assert(outward.every((wall) => wallActive(game, wall)));
+  assert(wallActive(game, homeward));
+});
+
+test("an Aegis can be captured after spending the last TV to enter it", () => {
+  const game = playGame();
+  game.players.blue.tv = 1;
+  proxy(game, 101, "blue");
+  assert.equal(applyAction(game, "blue", cost("move", 101, 126), start), null);
+  assert.equal(game.activeSide, "blue");
+  assert.equal(game.players.blue.tv, 0);
+  assert.equal(applyAction(game, "blue", cost("occupy", 126, 126), start), null);
+  assert.equal(nodeController(game, 126), "blue");
+  assert.equal(game.activeSide, "red");
+});
+
+test("Obelisk occupation has a TV cost and remains captured after departure", () => {
+  const game = playGame();
+  game.speciesPicks = { blue: "veyari", red: "keth" };
+  const obelisk = sentinels.red[0];
+  const from = 51;
+  const wall = walls.find(({ source }) => source === obelisk);
+  proxy(game, from, "blue");
+  assert.equal(applyAction(game, "blue", cost("move", from, obelisk), start), null);
+  assert(wallActive(game, wall));
+  assert.equal(applyAction(game, "blue", cost("occupy", obelisk, obelisk), start), null);
+  assert.equal(game.players.blue.tv, 1);
+  assert.equal(applyAction(game, "blue", cost("move", obelisk, from), start), null);
+  assert.equal(applyAction(game, "red", { type: "end" }, start), null);
+  assert.equal(nodeController(game, obelisk), "blue");
+  assert(!wallActive(game, wall));
+});
+
+test("a Deposit costs 3 TV and grants a reserve even if the claim is denied", () => {
+  const game = playGame();
   const deposit = 162;
   proxy(game, deposit, "blue");
   assert.equal(nodeController(game, deposit), null);
   assert.equal(applyAction(game, "blue", cost("occupy", deposit, deposit), start), null);
-  assert.equal(game.players.blue.tv, 2);
+  assert.equal(game.players.blue.tv, 3);
   assert.equal(game.players.blue.reserve, 1);
   const retreat = proxyActions(game, deposit).find(({ type }) => type === "move");
   assert.equal(applyAction(game, "blue", retreat, start), null);
@@ -156,7 +223,6 @@ test("Aegis claims are free and a deposit costs 3 TV even if the claim is later 
   assert.equal(applyAction(game, "red", { type: "end" }, start), null);
   assert.equal(nodeController(game, deposit), null);
   assert.equal(game.players.blue.reserve, 1);
-  assert.equal(nodeController(game, aegis.id), "blue");
 });
 
 test("a reserve Proxy deploys only at its own Cradle and powers up next turn", () => {
@@ -197,17 +263,21 @@ test("enemy shields block movement and the Nexus is reachable after its Vanguard
   const game = playGame();
   const wall = walls.find((edge) => edge.side === "red" && wallActive(game, edge));
   proxy(game, wall.from, "blue");
+  proxy(game, wall.to, "red");
   assert.equal(applyAction(game, "blue", cost("move", wall.from, wall.to), start), "That action is unavailable.");
+  assert.equal(game.proxies[wall.to].side, "red");
 
   const target = nexus.red;
   const from = tiles.get(target).neighbors.find((id) => id !== null && tiles.get(id).node?.type !== "vanguard");
   proxy(game, from, "blue");
+  proxy(game, target, "red");
   proxy(game, vanguards.red[0], "red");
   assert.equal(baseShieldActive(game, "red"), true);
   assert.equal(applyAction(game, "blue", cost("move", from, target), start), "That action is unavailable.");
   for (const id of sentinels.red) game.claims[id] = { held: "blue", pending: null };
   assert.equal(baseShieldActive(game, "red"), false);
   assert.equal(applyAction(game, "blue", cost("move", from, target), start), null);
+  assert.equal(game.proxies[target].side, "blue");
   assert.equal(game.winner, "blue");
   assert.equal(game.phase, "finished");
   assert.equal(game.deadline, null);

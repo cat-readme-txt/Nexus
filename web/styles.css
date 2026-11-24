@@ -44,7 +44,7 @@ button {
 }
 button:not(:disabled):hover { background: #25344a; border-color: #6b7f99; }
 button:disabled { opacity: .45; cursor: default; }
-button:focus-visible, canvas:focus-visible, summary:focus-visible, input:focus-visible {
+button:focus-visible, canvas:focus-visible, summary:focus-visible, input:focus-visible, select:focus-visible {
   outline: 2px solid var(--gold);
   outline-offset: 3px;
 }
@@ -291,6 +291,47 @@ details form label { display: block; font-size: .88rem; margin-bottom: .28rem; }
 .dialog-heading h2 { font-size: 1.35rem; }
 dialog::backdrop { background: #050913c7; backdrop-filter: blur(3px); }
 dialog { width: min(42rem, 100% - 1.25rem); max-height: 88svh; color: var(--text); padding: 1.22rem; }
+#settings-dialog { width: min(31rem, 100% - 1.25rem); }
+.settings-controls { display: grid; gap: .95rem; }
+.volume-control {
+  display: grid;
+  grid-template-columns: minmax(7rem, 1fr) minmax(3rem, 1fr) 3rem;
+  align-items: center;
+  gap: .55rem;
+}
+.volume-control input, .test-setting input { padding: 0; margin: 0; accent-color: var(--gold); }
+.volume-control output { color: var(--muted); text-align: end; font-variant-numeric: tabular-nums; }
+.design-control { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: .55rem; }
+.design-control select {
+  font: inherit;
+  color: var(--text);
+  background: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: .37rem .5rem;
+}
+.test-setting { border-top: 1px solid var(--line); padding-top: .85rem; }
+.test-setting label { display: flex; align-items: center; gap: .55rem; }
+.test-setting input { width: 1rem; height: 1rem; }
+.test-setting p { margin-top: .3rem; font-size: .9rem; }
+.terminal-output, .terminal-form input { font-family: ui-monospace, "SF Mono", Consolas, monospace; }
+.terminal-output {
+  height: 11rem;
+  margin-block: .65rem;
+  padding: .65rem .8rem;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--ink);
+  color: #c3e6d9;
+  font-size: .9rem;
+}
+.terminal-output p + p { margin-top: .4rem; }
+.terminal-output .command-error { color: #ffac98; }
+.terminal-form { display: flex; gap: .55rem; }
+.terminal-form input { letter-spacing: normal; text-transform: none; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .rules-content { display: grid; gap: .75rem; }
 .rules-content dl { display: grid; gap: .5rem; }
 .rule-actions > div, .rule-nodes > div { border-top: 1px solid var(--line); padding-top: .5rem; }
@@ -341,6 +382,8 @@ body:has(#augments-dialog[open]) #notice { visibility: hidden; }
 .species-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .8rem; }
 .species-grid.revealed { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .species-card { display: flex; flex-direction: column; gap: .6rem; padding: 1rem; }
+.species-card-heading { display: flex; align-items: center; gap: .68rem; }
+.species-card-heading img { flex: 0 0 48px; object-fit: contain; }
 .species-card h2 { color: var(--accent); font-size: 1.14rem; }
 .species-card button { margin-top: auto; text-align: start; }
 .review-table { margin-block: 1.25rem .9rem; }

@@ -1,6 +1,6 @@
 import { board, nexus, SIDES, sideName, tileLabel, tileName, tiles, walls } from "./board.js";
 import { NODE_ICONS } from "./hex-inspector.js";
-import { baseShieldActive, nodeController, proxiesAt, proxyReady, wallActive } from "./rules.js";
+import { baseShieldActive, nodeController, proxyReady, wallActive } from "./rules.js";
 
 export const IMPACT_MS = 220;
 const RADIUS = 25;
@@ -28,6 +28,29 @@ const team = {
   blue: { wall: "#b394ff", body: "#294f99", light: "#b5d2ff" },
   red: { wall: "#eea367", body: "#85373e", light: "#ffc0ae" },
 };
+const INLAYS = {
+  nexus: { color: "#ffe294", paths: [
+    [[-10, -15], [-10, -18], [-5, -15], [0, -19.5], [5, -15], [10, -18], [10, -15]],
+    [[-8, 16], [8, 16]],
+  ] },
+  vanguard: { color: "#efba86", paths: [
+    [[-16, -10], [-21, 0], [-16, 10]], [[16, -10], [21, 0], [16, 10]],
+  ] },
+  sentinel: { color: "#d0b9fd", paths: [
+    [[-6, -14], [0, -19], [6, -14]], [[-6, 14], [0, 19], [6, 14]],
+  ] },
+  aegis: { color: "#f0c980", paths: [
+    [[-9, -16], [9, -16]], [[-9, 16], [9, 16]],
+  ] },
+  deposit: { color: "#f1c36e", ring: true },
+  cache: { color: "#a1efdf", paths: [
+    [[-19, 0], [0, -17.5], [19, 0], [0, 17.5], [-19, 0]],
+  ] },
+};
+const DRONE = [
+  [0, -12], [5.4, -7.2], [6.7, -3.5], [11.2, .6], [11.2, 7.5], [5.5, 5.8],
+  [0, 10.2], [-5.5, 5.8], [-11.2, 7.5], [-11.2, .6], [-6.7, -3.5], [-5.4, -7.2],
+];
 const directionKeys = { w: 0, e: 1, d: 2, s: 3, a: 4, q: 5, ArrowUp: 0, ArrowDown: 3 };
 
 export function createBoardView(canvas, viewport, chooseTile, previewAction) {
@@ -45,6 +68,7 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
   const flashes = new Map();
   const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
   let order = "move";
+  let proxyDesign = "drone";
   let zoom = 1;
   let frame = 0;
 
@@ -75,7 +99,7 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
 
   function drawTile(tile) {
     const { x, y } = centers.get(tile.id);
-    const [proxy, contender] = proxiesAt(game, tile.id);
+    const proxy = game?.proxies[tile.id];
     const action = targets.get(tile.id);
     const isSelected = tile.id === selection;
     const isInspected = tile.id === inspected;
@@ -100,8 +124,8 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
     ctx.stroke();
 
     if (proxy) {
-      if (kind || cache) drawNodeMark(x, y, cache ? "C" : NODE_ICONS[kind].mark, cache);
-      drawProxy(proxy, x, y, proxyReady(game, proxy), action || planned, contender);
+      if (kind || cache) drawNodeInlay(x, y, INLAYS[kind ?? "cache"]);
+      drawProxy(proxy, x, y, proxyReady(game, proxy), action || planned);
     } else {
       if (kind && assets[kind]?.complete && assets[kind].naturalWidth) {
         const { size } = NODE_ICONS[kind];
@@ -116,14 +140,23 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
     }
   }
 
-  function drawNodeMark(x, y, mark, cache) {
-    ctx.fillStyle = "#101c30";
-    ctx.fillRect(x - 16, y - 16, 9, 9);
-    ctx.fillStyle = cache ? "#a1efdf" : "#ffdb91";
-    ctx.font = "bold 8px system-ui";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(mark, x - 11.5, y - 11.5);
+  function drawNodeInlay(x, y, { color, paths, ring }) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.85;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    if (ring) ctx.arc(0, 0, 17.7, 0, 2 * Math.PI);
+    else {
+      for (const [[startX, startY], ...rest] of paths) {
+        ctx.moveTo(startX, startY);
+        for (const [px, py] of rest) ctx.lineTo(px, py);
+      }
+    }
+    ctx.stroke();
+    ctx.restore();
   }
 
   function drawCache(x, y) {
@@ -133,42 +166,48 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
     ctx.strokeRect(x - 2, y - 5, 4, 10);
   }
 
-  function drawProxy(proxy, x, y, ready, action, contender) {
-    const radius = 11.1;
-    const color = team[proxy.side];
-    ctx.save();
-    ctx.translate(x, y);
-    if (!ready) ctx.setLineDash([3, 2]);
-    ctx.beginPath();
-    ctx.moveTo(0, -radius);
+  function traceClassicProxy() {
+    ctx.moveTo(0, -11.1);
     ctx.lineTo(9, -6.3);
     ctx.lineTo(8.1, 3.5);
     ctx.quadraticCurveTo(5.6, 8, 0, 11);
     ctx.quadraticCurveTo(-5.6, 8, -8.1, 3.5);
     ctx.lineTo(-9, -6.3);
+  }
+
+  function drawProxy(proxy, x, y, ready, action) {
+    const classic = proxyDesign === "classic";
+    const color = team[proxy.side];
+    ctx.save();
+    ctx.translate(x, y);
+    if (!classic) ctx.lineJoin = "round";
+    if (!ready) ctx.setLineDash([3, 2]);
+    ctx.beginPath();
+    if (classic) traceClassicProxy();
+    else {
+      ctx.moveTo(...DRONE[0]);
+      for (let i = 1; i < DRONE.length; i += 1) ctx.lineTo(...DRONE[i]);
+    }
     ctx.closePath();
     ctx.fillStyle = ready ? color.body : "#26313b";
     ctx.strokeStyle = action ? "#ffdea0" : color.light;
     ctx.lineWidth = action ? 2.5 : 2;
     ctx.fill();
-    if (contender) {
-      ctx.save();
-      ctx.clip();
-      ctx.fillStyle = team[contender.side].body;
-      ctx.fillRect(0, -radius, radius, radius * 2);
-      ctx.restore();
-      ctx.setLineDash([]);
-      ctx.strokeStyle = "#fff1c2";
-    }
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.beginPath();
-    ctx.moveTo(-3.7, -1);
-    ctx.lineTo(0, 3.1);
-    ctx.lineTo(3.7, -1);
-    ctx.strokeStyle = color.light;
-    ctx.lineWidth = 1.55;
-    ctx.stroke();
+    if (classic) {
+      ctx.beginPath();
+      ctx.moveTo(-3.7, -1);
+      ctx.lineTo(0, 3.1);
+      ctx.lineTo(3.7, -1);
+      ctx.strokeStyle = color.light;
+      ctx.lineWidth = 1.55;
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = color.light;
+      ctx.fillRect(-3.5, -2.9, 7, 2);
+      if (ready) ctx.fillRect(-1, 2.8, 2, 2);
+    }
     if (proxy.fortified) {
       hex(0, 0, 14);
       ctx.strokeStyle = "#ffdb91";
@@ -178,7 +217,7 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
     ctx.restore();
   }
 
-  function drawWall({ from, to, side }, active) {
+  function drawWall({ from, to, side, source }, active) {
     const a = centers.get(from);
     const b = centers.get(to);
     const x = (a.x + b.x) / 2;
@@ -189,7 +228,7 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
     ctx.beginPath();
     ctx.moveTo(x - dx, y - dy);
     ctx.lineTo(x + dx, y + dy);
-    drawShield(team[side].wall, active);
+    drawShield(source === inspected ? "#fff1bd" : team[side].wall, active);
   }
 
   function drawShield(color, active) {
@@ -261,7 +300,7 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
       ctx.clearRect(0, 0, WIDTH, MAP_HEIGHT);
       for (const tile of board) drawTile(tile);
       for (const wall of walls) {
-        const active = game ? wallActive(game, wall) : wall.sources.some((id) => tiles.get(id).node.type !== "vanguard");
+        const active = !game || wallActive(game, wall);
         drawWall(wall, active);
       }
       for (const side of SIDES) {
@@ -313,12 +352,15 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
   function describeCursor() {
     if (cursor === null) return;
     const tile = tiles.get(cursor);
-    const occupants = proxiesAt(game, cursor);
+    const proxy = game?.proxies[cursor];
     const action = targets.get(cursor);
     let label = `${tileLabel(cursor)}, ${tileName(tile)}`;
     if (game?.caches?.includes(cursor)) label += ", salvage cache";
-    for (const proxy of occupants) label += `, ${sideName(proxy.side)} ${proxy.fortified ? "fortified Proxy" : "Proxy"}`;
-    if (action) label += `, ${action.type}, ${action.cost} TV`;
+    if (proxy) label += `, ${sideName(proxy.side)} ${proxy.fortified ? "fortified Proxy" : "Proxy"}`;
+    if (action) {
+      label += `, ${action.type === "move" && proxy ? "capture Proxy" : action.type}, ${action.cost} TV`;
+      if (action.refund) label += ", refunded by Ascension";
+    }
     else if (range.has(cursor)) label += ", in Obelisk range";
     canvas.setAttribute("aria-label", label);
   }
@@ -372,6 +414,10 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
   new ResizeObserver(resize).observe(viewport);
   resize();
   return {
+    setProxyDesign(design) {
+      proxyDesign = design;
+      draw();
+    },
     render(state, { selected = null, inspect = null, actions = [], planned = [], mode = "move", firingRange = [] } = {}) {
       showNewImpacts(state);
       game = state;

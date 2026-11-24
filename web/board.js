@@ -50,14 +50,17 @@ for (const { id, node } of nodes) {
 }
 
 export const edgeKey = (a, b) => a < b ? `${a}:${b}` : `${b}:${a}`;
-export const walls = SHIELD_LAYOUT.map(([from, to, ...sources]) => ({
-  from, to, sources, side: tiles.get(sources[0]).node.home,
+export const walls = SHIELD_LAYOUT.map(([from, to, source]) => ({
+  from, to, source, side: tiles.get(source).node.home,
 }));
 export const wallsByEdge = new Map();
+export const wallsBySource = new Map();
 for (const wall of walls) {
   const key = edgeKey(wall.from, wall.to);
   if (!wallsByEdge.has(key)) wallsByEdge.set(key, []);
   wallsByEdge.get(key).push(wall);
+  if (!wallsBySource.has(wall.source)) wallsBySource.set(wall.source, []);
+  wallsBySource.get(wall.source).push(wall);
 }
 
 export const NODE_NAMES = {

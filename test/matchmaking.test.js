@@ -86,6 +86,31 @@ test("the server advances deadlines and refuses commands from expired revisions"
   assert.equal(reply.error, "The game state changed. Try the action again.");
 });
 
+test("online matches restore an interrupted move from older rules and capture on the next Move", () => {
+  const lobby = createLobby();
+  const a = client(lobby, blue);
+  const b = client(lobby, red);
+  a("find");
+  const { room } = b("find");
+  pick(a, room, "directorate");
+  pick(b, room, "keth");
+  const game = lobby.rooms[room].game;
+  game.phase = "play";
+  game.players.blue.tv = 2;
+  game.engagement = { from: 162, to: 163, proxy: { side: "blue", readyOn: 0 } };
+  game.proxies[163] = { side: "red", readyOn: 0 };
+  const restored = b("poll", { room, revision: game.revision });
+  assert.equal(restored.game.proxies[162].side, "blue");
+  assert.equal(restored.game.proxies[163].side, "red");
+  assert.equal(restored.game.engagement, undefined);
+  const action = { type: "move", from: 162, to: 163 };
+  assert.equal(a("action", { room, revision: restored.game.revision, action }).game.players.blue.tv, 1);
+  const updated = b("poll", { room, revision: restored.game.revision }).game;
+  assert.equal(updated.proxies[162], undefined);
+  assert.equal(updated.proxies[163].side, "blue");
+  assert.equal(updated.stats.blue.moveCaptures, 1);
+});
+
 test("the HTTP matchmaking endpoint supports GitHub Pages CORS and persistent updates", async () => {
   const lobby = createLobby();
   const endpoint = "https://matchmaking.example/api/match";

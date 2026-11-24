@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { board, cradles, tiles, vanguards, walls } from "../web/board.js";
+import { board, cradles, nexus, tiles, vanguards, walls } from "../web/board.js";
 import {
   applyAction, augmentStatus, baseShieldActive, createGame, defensiveTargets, freeReserve,
   hopTargets, placementActions, proxyActions, readyProxy, wallActive,
@@ -38,11 +38,6 @@ function use(game, augment) {
 
 function giveTurn(game) {
   assert.equal(play(game, { type: "end" }), null);
-}
-
-function strikeInPlace(game, from, to) {
-  assert.equal(play(game, { type: "move", from, to }), null);
-  assert.equal(play(game, { type: "strike", from: to, to }), null);
 }
 
 test("an augment requires a claimed, staffed Deposit at purchase and can be used once later", () => {
@@ -87,21 +82,28 @@ test("Ascension unlocks its tiers using the player's turns and leaves core actio
   assert.equal(buy(game, "ascension"), null);
   assert.equal(use(game, "ascension"), null);
   assert.equal(play(game, { type: "move", from: 36, to: 37 }), null);
-  assert.equal(proxyActions(game, 37).find((a) => a.type === "strike").cost, 2);
-  assert.equal(play(game, { type: "withdraw", from: 37, to: 36 }), null);
+  assert.equal(game.players.blue.tv, 19);
   game.players.blue.turns = 6;
-  assert.equal(play(game, { type: "move", from: 36, to: 37 }), null);
-  assert.equal(proxyActions(game, 37).find((a) => a.type === "strike").cost, 1);
-  assert.equal(play(game, { type: "withdraw", from: 37, to: 36 }), null);
+  placeProxy(game, 38, "red");
+  assert.equal(proxyActions(game, 37).find(({ to }) => to === 38).refund, 1);
+  assert.equal(play(game, { type: "move", from: 37, to: 38 }), null);
+  assert.equal(game.players.blue.tv, 19);
+  assert.equal(game.stats.blue.tvRefunded, 1);
+  placeProxy(game, 37, "red");
+  assert.equal(proxyActions(game, 38).find(({ to }) => to === 37).refund, undefined);
+  assert.equal(play(game, { type: "move", from: 38, to: 37 }), null);
+  assert.equal(game.players.blue.tv, 18);
   delete game.proxies[37];
+  placeProxy(game, 36);
   placeProxy(game, 38, "red");
   game.players.blue.turns = 11;
   assert(!proxyActions(game, 36).some((a) => a.to === 38));
   game.players.blue.turns = 12;
-  const strike = proxyActions(game, 36).find((a) => a.to === 38);
-  assert.equal(strike.type, "ascension-strike");
-  assert.equal(strike.cost, 1);
-  assert.equal(play(game, strike), null);
+  const move = proxyActions(game, 36).find((a) => a.to === 38);
+  assert.equal(move.type, "move");
+  assert.equal(move.cost, 1);
+  assert.equal(move.refund, 1);
+  assert.equal(play(game, move), null);
   assert.equal(game.proxies[38].side, "blue");
   assert.equal(game.proxies[36], undefined);
   assert(!proxyActions(game, 38).some((a) => a.to === 36));
@@ -110,7 +112,9 @@ test("Ascension unlocks its tiers using the player's turns and leaves core actio
   placeProxy(game, 163);
   placeProxy(game, 162, "red");
   assert.equal(tiles.get(163).region, "turbulence");
-  assert(!proxyActions(game, 163).some(({ type }) => type === "ascension-strike"));
+  const turbulent = proxyActions(game, 163).filter(({ type }) => type === "move");
+  assert(turbulent.some(({ to }) => to === 162));
+  assert(turbulent.every(({ to, refund }) => !refund && tiles.get(163).neighbors.includes(to)));
 });
 
 test("Overload can be saved after a 30 TV purchase and adds banked TV above the recharge cap", () => {
@@ -156,17 +160,15 @@ test("the Call of Void fills empty Cradle tiles and banks the rest of the 30 fre
 
 test("EMP shuts down enemy Aegis and Obelisk shields for the round and preserves Vanguards", () => {
   const game = scenario();
-  const normal = walls.find((wall) => wall.side === "red" && wall.sources
-    .every((id) => tiles.get(id).node.type !== "vanguard"));
-  const vanguard = walls.find((wall) => wall.side === "red" && wall.sources
-    .some((id) => tiles.get(id).node.type === "vanguard"));
+  const normal = walls.find(({ side, source }) => side === "red" && source !== nexus.red);
+  const flank = walls.find(({ source }) => source === nexus.red);
   placeProxy(game, vanguards.red[0], "red");
   assert(wallActive(game, normal));
-  assert(wallActive(game, vanguard));
+  assert(wallActive(game, flank));
   assert.equal(buy(game, "emp"), null);
   assert.equal(use(game, "emp"), null);
   assert.equal(wallActive(game, normal), false);
-  assert(wallActive(game, vanguard));
+  assert(wallActive(game, flank));
   assert(baseShieldActive(game, "red"));
   giveTurn(game);
   assert.equal(wallActive(game, normal), false);
@@ -183,7 +185,7 @@ test("Troop Disabler blocks next-turn rewards and leaves existing reserve availa
   assert.equal(buy(game, "disabler"), null);
   assert.equal(use(game, "disabler"), null);
   giveTurn(game);
-  strikeInPlace(game, 162, 163);
+  assert.equal(play(game, { type: "move", from: 162, to: 163 }), null);
   assert.equal(game.players.red.reserve, 1);
   const to = cradles.red[0];
   assert.equal(play(game, { type: "spawn", to }), null);
@@ -221,12 +223,12 @@ test("Deadly Retaliation drains the next opponent to zero without going negative
   assert.equal(use(game, "retaliation"), null);
   giveTurn(game);
   assert.equal(game.players.red.tv, 4);
-  strikeInPlace(game, 162, 163);
+  assert.equal(play(game, { type: "move", from: 162, to: 163 }), null);
   assert.equal(game.players.red.tv, 0);
   assert.equal(game.activeSide, "blue");
-  assert(game.events.some((entry) => entry.includes("lost 1 TV to Deadly Retaliation")));
+  assert(game.events.some((entry) => entry.includes("lost 3 TV to Deadly Retaliation")));
   placeProxy(game, 162);
   giveTurn(game);
-  strikeInPlace(game, 163, 162);
-  assert.equal(game.players.red.tv, 1);
+  assert.equal(play(game, { type: "move", from: 163, to: 162 }), null);
+  assert.equal(game.players.red.tv, 3);
 });

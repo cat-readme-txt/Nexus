@@ -75,7 +75,7 @@ test("a Turbulence cache surfaces on round three and a ready Proxy can recover i
 test("forward deployment consumes a reserve, protects activation timing, and drops the Aegis shield through the enemy turn", () => {
   const game = playing("keth");
   const { id: from } = nodes.find(({ node }) => node.type === "aegis" && node.home === "blue");
-  const shield = walls.find(({ sources }) => sources.length === 1 && sources[0] === from);
+  const shield = walls.find(({ source }) => source === from);
   place(game, from);
   game.players.blue.reserve = 2;
   assert(wallActive(game, shield));
@@ -98,14 +98,10 @@ test("forward deployment consumes a reserve, protects activation timing, and dro
   assert(forwardActions(game, from).length > 0);
 });
 
-test("Directorate supply depends on staffing a controlled Deposit and ordinary Strikes cost extra", () => {
+test("Directorate supply depends on staffing a controlled Deposit", () => {
   const game = playing();
   place(game, 162);
-  place(game, 163, "red");
   game.claims[162] = { held: "blue", pending: null };
-  assert.equal(act(game, { type: "move", from: 162, to: 163 }), null);
-  assert.equal(proxyActions(game, 163).find(({ type }) => type === "strike").cost, 3);
-  assert.equal(act(game, { type: "withdraw", from: 163, to: 162 }), null);
   nextBlueTurn(game);
   assert.equal(game.players.blue.tv, 7);
   assert.equal(game.players.blue.reserve, 1);
@@ -115,6 +111,19 @@ test("Directorate supply depends on staffing a controlled Deposit and ordinary S
   nextBlueTurn(game);
   assert.equal(game.players.blue.tv, 4);
   assert.equal(game.players.blue.reserve, 1);
+});
+
+test("Directorate Obelisk shots cost 2 TV", () => {
+  const game = playing();
+  place(game, 4);
+  place(game, 6, "red");
+  game.players.blue.tv = 1;
+  const shot = { type: "fire", from: 4, to: 6 };
+  assert.match(act(game, shot), /unavailable/);
+  game.players.blue.tv = 2;
+  assert.equal(act(game, shot), null);
+  assert.equal(game.stats.blue.tvSpent, 2);
+  assert.equal(game.proxies[6], undefined);
 });
 
 test("Veyari jump ignores ordinary shields once per turn and paid occupation costs 4 TV", () => {
@@ -137,27 +146,25 @@ test("Veyari jump ignores ordinary shields once per turn and paid occupation cos
   assert.equal(nodeController(game, 162), "blue");
 });
 
-test("Keth armor absorbs one hit, denies entry, and lets a follow-up occupy the hex", () => {
+test("Keth armor absorbs one Obelisk hit and a second shot removes the Proxy", () => {
   const game = playing("keth", "veyari");
-  place(game, 4);
-  place(game, 5, "red");
-  assert.equal(act(game, { type: "fortify", from: 4, to: 4 }), null);
-  assert.equal(game.proxies[4].fortified, true);
-  assert.match(act(game, { type: "fortify", from: 4, to: 4 }), /unavailable/);
+  const target = 126;
+  game.claims[target] = { held: "blue", pending: null };
+  place(game, target);
+  place(game, 76, "red");
+  const fortify = { type: "fortify", from: target, to: target };
+  assert.equal(act(game, fortify), null);
+  assert.equal(game.proxies[target].fortified, true);
+  assert.match(act(game, fortify), /unavailable/);
   assert.equal(act(game, { type: "end" }), null);
-  game.players.red.tv = 8;
-  const enter = { type: "move", from: 5, to: 4 };
-  const strike = { type: "strike", from: 4, to: 4 };
-  assert.equal(act(game, enter), null);
-  assert.equal(act(game, strike), null);
-  assert.equal(game.proxies[5].side, "red");
-  assert.equal(game.proxies[4].side, "blue");
+  const shot = { type: "fire", from: 76, to: target };
+  assert.equal(act(game, shot), null);
+  assert.equal(game.proxies[target].side, "blue");
+  assert.equal(game.proxies[target].fortified, undefined);
   assert.equal(game.players.red.reserve, 0);
   assert.equal(game.stats.blue.hitsAbsorbed, 1);
-  assert.equal(act(game, enter), null);
-  assert.equal(act(game, strike), null);
-  assert.equal(game.proxies[4].side, "red");
-  assert.equal(game.proxies[5], undefined);
+  assert.equal(act(game, shot), null);
+  assert.equal(game.proxies[target], undefined);
   assert.equal(game.players.red.reserve, 1);
   assert.equal(game.stats.blue.lost, 1);
 });

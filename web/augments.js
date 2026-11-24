@@ -5,7 +5,7 @@ export const AUGMENTS = [
   },
   {
     id: "ascension", name: "Ascension", price: 10,
-    description: "On turns 6, 12, and 18, unlock cheaper strikes, two-hex teleport strikes, and two-hex moves. Turbulence suppresses these abilities.",
+    description: "From turn 6, your first capture by Move each turn refunds 1 TV. From turn 12, capture up to two reachable hexes away. From turn 18, Move up to two hexes even to an empty hex. Moving from Turbulence suppresses these bonuses.",
   },
   {
     id: "overload", name: "Capacitor Overload", price: 30,
@@ -25,11 +25,11 @@ export const AUGMENTS = [
   },
   {
     id: "defensive", name: "Defensive Strike", price: 5,
-    description: "Choose up to three enemy Proxies anywhere in your own territory and destroy them.",
+    description: "Hit up to three enemy Proxies anywhere in your own territory. Fortification can absorb the hit.",
   },
   {
     id: "retaliation", name: "Deadly Retaliation", price: 10,
-    description: "On the enemy’s next turn, drain up to 5 TV each time they strike one of your Proxies.",
+    description: "On the enemy’s next turn, drain up to 5 TV for each of your Proxies they capture by Move or target with Defensive Strike.",
   },
 ];
 

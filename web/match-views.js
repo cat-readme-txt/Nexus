@@ -10,11 +10,26 @@ function element(tag, text) {
   return node;
 }
 
+function speciesHeading(title, species) {
+  const heading = element("div");
+  heading.className = "species-card-heading";
+  if (species) {
+    const emblem = element("img");
+    emblem.src = `./assets/species-${species.id}.png`;
+    emblem.alt = "";
+    emblem.width = 48;
+    emblem.height = 48;
+    heading.append(emblem);
+  }
+  heading.append(element("h2", title));
+  return heading;
+}
+
 export function speciesCards(onChoose) {
   return SPECIES.map((species) => {
     const card = element("article");
     card.className = "panel species-card";
-    const name = element("h2", species.name);
+    const name = speciesHeading(species.name, species);
     const origin = element("p", species.origin);
     origin.className = "muted";
     const power = element("p", species.power);
@@ -31,10 +46,11 @@ export function speciesCards(onChoose) {
 const metrics = [
   ["TV earned", "tvEarned"],
   ["TV spent", "tvSpent"],
+  ["TV refunded by Ascension", "tvRefunded"],
   ["Move orders", "moveOrders"],
-  ["Strike orders", "strikeOrders"],
+  ["Move captures", "moveCaptures"],
   ["Obelisk shots", "obeliskShots"],
-  ["Withdrawals", "withdrawals"],
+  ["Defensive Strike uses", "defensiveStrikes"],
   ["Reinforcements deployed", "deployed"],
   ["Forward deployments", "forwardDeployed"],
   ["Proxies lost", "lost"],
@@ -54,7 +70,7 @@ export function renderReview(game) {
     const card = element("article");
     card.className = "panel species-card";
     card.dataset.side = side;
-    card.append(element("h2", `${sideName(side)} · ${species?.name ?? "Unassigned"}`));
+    card.append(speciesHeading(`${sideName(side)} · ${species?.name ?? "Unassigned"}`, species));
     if (species) {
       const origin = element("p", species.origin);
       origin.className = "muted";

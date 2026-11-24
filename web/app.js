@@ -1,14 +1,16 @@
 import { AUGMENTS } from "./augments.js";
+import { createGameAudio } from "./audio.js";
 import { sideName, SIDES, tileLabel, tileName, tiles } from "./board.js";
 import { createBoardView, IMPACT_MS } from "./board-view.js";
 import { renderHexInspector } from "./hex-inspector.js";
 import { renderReview, renderStats, speciesCards } from "./match-views.js";
 import { onlineAvailable, savedOnlineSession, sendOnline } from "./online.js";
+import { runTestCommand } from "./terminal.js";
 import {
-  ACTION_COST, advanceClock, allProxies, applyAction, augmentBuyError, augmentEffects, augmentStatus,
+  advanceClock, allProxies, applyAction, augmentBuyError, augmentEffects, augmentStatus,
   canFireFrom, concedeGame, createGame, defensiveTargets, deploymentCost, fabricationError,
   forwardActions, freeReserve, hasAugmentDeposit, hopTargets,
-  obeliskRange, placementActions, proxyActions, readyProxy, STARTING_PROXIES, TURN_SECONDS,
+  obeliskFireCost, obeliskRange, placementActions, proxyActions, readyProxy, STARTING_PROXIES, TURN_SECONDS,
 } from "./rules.js";
 
 const get = (id) => document.getElementById(id);
@@ -33,6 +35,9 @@ let deadlinePassed = false;
 let connectionLost = false;
 const leaveDialog = get("leave-dialog");
 const augmentDialog = get("augments-dialog");
+const terminalDialog = get("terminal-dialog");
+const audio = createGameAudio();
+let terminalTurn = null;
 let queuedAction = null;
 let selectionReady = false;
 let finalBoard = false;
@@ -41,6 +46,8 @@ let impactTransition = null;
 const view = createBoardView(get("board"), get("board-viewport"), choose, previewAction);
 const augmentRows = AUGMENTS.map(augmentRow);
 const speciesControls = speciesCards(lockSpecies);
+const targetOrders = ["deploy", "fire", "forward", "phase-jump"];
+const tileOrders = ["occupy", "salvage", "fortify"];
 
 function setOrder(next = "move") {
   order = next;
@@ -52,14 +59,16 @@ function targeting() {
 }
 
 function previewAction(id, action, inRange) {
-  if (!game || game.phase !== "play" || !usableTurn()) return;
+  if (game?.phase !== "play") return;
+  const tile = tiles.get(id);
   const name = {
-    move: game.proxies[id] ? "Move into occupied hex" : "Move", "ascension-strike": "Ascension strike", spawn: "Deploy",
+    move: game.proxies[id] ? "Capture Proxy" : "Move", spawn: "Deploy",
     fire: "Obelisk fire", "hop-target": "Hop landing", "defensive-target": "Defensive Strike target",
     "forward-deploy": "Forward deploy", "phase-jump": "Phase jump",
   }[action?.type];
-  const status = name ? `${tileLabel(id)} · ${name} · ${action.cost} TV`
-    : inRange ? `${tileLabel(id)} · Within Obelisk range` : `Round ${game.round} · ${sideName(game.activeSide)} turn`;
+  const status = name ? `${tileLabel(id)} · ${name} · ${action.cost} TV${action.refund ? " refunded by Ascension" : ""}`
+    : inRange ? `${tileLabel(id)} · Within Obelisk range`
+      : tile ? `${tileLabel(id)} · ${tileName(tile)}` : `Round ${game.round} · ${sideName(game.activeSide)} turn`;
   text("board-status", status);
 }
 
@@ -75,9 +84,22 @@ function usableTurn() {
     && (screen === "local" || (seat === game.activeSide && !pending && !deadlinePassed));
 }
 
+function terminalAvailable() {
+  return get("enable-terminal").checked && screen === "local" && game?.phase === "play" && game.deadline !== null;
+}
+
+function terminalOutput(message, error = false) {
+  const output = get("terminal-output");
+  const line = document.createElement("p");
+  line.textContent = message;
+  if (error) line.className = "command-error";
+  if (output.childElementCount >= 24) output.firstElementChild.remove();
+  output.append(line);
+  output.scrollTop = output.scrollHeight;
+}
+
 function legalCommands() {
   if (!usableTurn()) return { targets: [], options: [], forward: [] };
-  if (game.engagement) return { targets: [], options: proxyActions(game, game.engagement.to), forward: [] };
   if (game.phase === "setup" || order === "deploy") {
     return { targets: placementActions(game), options: [], forward: [] };
   }
@@ -114,7 +136,6 @@ function receiveGame(next) {
     deadlinePassed = false;
   }
   game = next;
-  if (game.engagement && inspected === null) inspected = game.engagement.to;
   if (newTurn && (screen === "local" || game.turn === 1 || game.activeSide === seat)) {
     view.focusSide(screen === "online" ? seat : game.activeSide);
   }
@@ -136,6 +157,7 @@ function lockSpecies(species) {
   } else if (selectionReady) {
     const error = applyAction(game, game.activeSide, action);
     if (error) {
+      audio.play("error");
       notice(error);
       return;
     }
@@ -167,12 +189,14 @@ function choose(id) {
     return;
   }
   inspected = id;
-  if (!usableTurn() || game.engagement) {
+  if (!usableTurn()) {
+    audio.play("select");
     render();
     return;
   }
   const action = legalCommands().targets.find(({ to }) => to === id);
   if (targeting()) {
+    audio.play("select");
     if (order === "hop") {
       if (id === plan.at(-1)) plan.pop();
       else if (action) plan.push(id);
@@ -189,6 +213,7 @@ function choose(id) {
     sendAction(action);
     return;
   }
+  audio.play("select");
   if (game.phase === "play" && !(order === "fire" && game.proxies[id]?.side !== game.activeSide)) {
     selected = id === selected ? null : id;
     setOrder();
@@ -200,8 +225,7 @@ function afterAction(action) {
   const side = game.activeSide;
   const landing = action.type === "hop" ? action.path.at(-1) : action.to;
   if (landing !== undefined) inspected = landing;
-  if (game.engagement) selected = game.engagement.to;
-  else if (landing !== undefined && game.proxies[landing]?.side === side) selected = landing;
+  if (landing !== undefined && game.proxies[landing]?.side === side) selected = landing;
   else if (action.from !== undefined && game.proxies[action.from]?.side === side) selected = action.from;
   if (action.type === "spawn" && placementActions(game).length) {
     selected = null;
@@ -232,7 +256,10 @@ function sendAction(action) {
     } else if (!error && game.phase === "play") {
       afterAction(intent);
     }
-    if (error) notice(error);
+    if (error) {
+      audio.play("error");
+      notice(error);
+    }
     render();
   }
 }
@@ -245,6 +272,9 @@ function renderClock() {
   const clock = game.deadline === null ? "–:––" : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
   text("timer", clock);
   if (augmentDialog.open) text("augment-timer", clock);
+  if (terminalDialog.open) text("terminal-timer", clock);
+  const listening = screen === "local" || seat === game.activeSide;
+  audio.countdown(game.turn, listening ? game.deadline : null, seconds);
   const timer = get("timer");
   timer.classList.toggle("urgent", game.deadline !== null && seconds <= 10);
   get("timer-bar").style.transform = `scaleX(${Math.min(1, remaining / (TURN_SECONDS * 1000))})`;
@@ -259,9 +289,7 @@ function ordersDescription() {
     return `Place ${remaining} ${remaining === 1 ? "Proxy" : "Proxies"} on highlighted Cradle hexes.`;
   }
   if (order === "deploy") return "Choose a highlighted Cradle hex.";
-  if (game.engagement) return `Both Proxies share ${tileLabel(game.engagement.to)}. Choose Strike or Withdraw.`;
   if (order === "fire") return "Outlined hexes show range. Choose a highlighted enemy Proxy to fire.";
-  if (order === "ascension-strike") return "Choose an enemy Proxy in teleport range.";
   if (order === "forward") return "Choose a highlighted hex beside the Aegis.";
   if (order === "phase-jump") return "Choose an open landing hex.";
   if (order === "defensive") return `${plan.length} of 3 targets selected. Choose enemy Proxies in your territory.`;
@@ -270,8 +298,9 @@ function ordersDescription() {
     if (hopTargets(game, selected, []).length) return "Choose a highlighted hex to jump over the adjacent Proxy.";
     return "Select an active Proxy with a valid jump.";
   }
+  if (game.players[game.activeSide].tv === 0) return "Select a Proxy on an Aegis to capture it for free, or end your turn.";
   if (selected !== null && game.proxies[selected]?.side === game.activeSide) {
-    return readyProxy(game, selected) ? "Choose a highlighted hex to move or select an order below."
+    return readyProxy(game, selected) ? "Choose a highlighted hex to move. Moving onto an enemy Proxy captures it."
       : "This Proxy can act starting on your next turn.";
   }
   return "Select a Proxy to see its moves, or choose a hex to inspect it.";
@@ -384,18 +413,20 @@ function renderMatch() {
   const available = (type) => options.find((action) => action.type === type);
   const fireAvailable = showOrders && canFireFrom(game, selected);
   const firingRange = fireAvailable && order === "fire" ? obeliskRange(game, selected).map(({ to }) => to) : [];
-  for (const type of ["occupy", "salvage", "fortify", "phase-jump", "strike", "withdraw", "ascension-strike"]) {
+  for (const type of [...tileOrders, "phase-jump"]) {
     hide(type, !available(type));
   }
   hide("fire", !fireAvailable);
-  button("fire", !canOrder || game.players[game.activeSide].tv < ACTION_COST.fire);
+  const fireCost = obeliskFireCost(game, game.activeSide);
+  button("fire", !canOrder || game.players[game.activeSide].tv < fireCost);
+  text("fire-cost", `${fireCost} TV`);
   hide("range-key", !fireAvailable || order !== "fire");
-  text("strike-cost", available("strike") ? `${available("strike").cost} TV` : "");
-  text("ascension-strike-cost", available("ascension-strike") ? `${available("ascension-strike").cost} TV` : "");
   hide("forward", !forward.length);
-  text("occupy-cost", available("occupy") ? `${available("occupy").cost} TV` : "");
+  const claim = available("occupy");
+  text("occupy-label", claim && tiles.get(claim.to).node.type !== "deposit" ? "Capture" : "Occupy");
+  text("occupy-cost", claim ? `${claim.cost} TV` : "");
   text("forward-cost", forward.length ? `${forward[0].cost} TV` : "");
-  hide("reinforcements", !showOrders || !!game.engagement);
+  hide("reinforcements", !showOrders);
   const deployments = canOrder && !targeting() ? placementActions(game) : [];
   button("deploy", deployments.length === 0);
   text("deploy-cost", `${deploymentCost(game, game.activeSide)} TV`);
@@ -404,12 +435,11 @@ function renderMatch() {
   text("fabrication-hint", blockedFabrication ?? "");
   hide("fabrication-hint", !blockedFabrication);
   hide("turn-actions", setup || finished || handoff);
-  button("augments-button", !!game.engagement);
   hide("target-actions", !targeting());
-  text("confirm-targets", order === "hop" ? "Confirm hop · 1 TV" : `Strike ${plan.length || "targets"}`);
+  text("confirm-targets", order === "hop" ? "Confirm hop · 1 TV" : "Use Defensive Strike");
   button("confirm-targets", !canOrder || plan.length === 0);
   button("end-turn", !canOrder);
-  for (const id of ["deploy", "fire", "forward", "phase-jump", "ascension-strike"]) {
+  for (const id of targetOrders) {
     get(id).setAttribute("aria-pressed", order === id);
   }
   get("activity").replaceChildren(...game.events.slice(-8).reverse().map((entry) => {
@@ -420,13 +450,17 @@ function renderMatch() {
   renderAugments();
   renderHexInspector(get("hex-inspector"), game, inspected);
   if (get("live-stats").open) renderStats(get("live-stats-table"), game);
-  view.render(game, { selected: game.engagement?.to ?? selected, inspect: inspected, actions: targets,
+  view.render(game, { selected, inspect: inspected, actions: targets,
     planned: plan, mode: order, firingRange });
   renderClock();
 }
 
 function render() {
   document.body.dataset.screen = screen;
+  audio.sync(game, seat);
+  const canOpenTerminal = terminalAvailable();
+  hide("terminal-button", !canOpenTerminal);
+  if (terminalDialog.open && (!canOpenTerminal || terminalTurn?.number !== game.turn)) terminalDialog.close();
   const picking = game?.phase === "species";
   const finished = game?.phase === "finished";
   const reviewing = finished && !finalBoard && impactTransition === null;
@@ -501,6 +535,8 @@ function acceptReply(reply, op) {
     room = reply.room;
     if (newMatch) {
       game = null;
+      audio.sync(null);
+      audio.play("start");
       finalBoard = false;
       inspected = null;
     }
@@ -512,6 +548,7 @@ function acceptReply(reply, op) {
       queuedAction = null;
     }
   } else if (reply.status === "waiting") {
+    if (screen !== "waiting") audio.play("search");
     screen = "waiting";
     waiting = reply;
   } else {
@@ -519,7 +556,10 @@ function acceptReply(reply, op) {
     showMenu();
     if (expired) notice("The online session expired.");
   }
-  if (reply.error) notice(reply.error);
+  if (reply.error) {
+    audio.play("error");
+    notice(reply.error);
+  }
   else if (reply.status !== "idle") notice("");
   render();
 }
@@ -538,6 +578,7 @@ async function exchange(op, fields) {
     acceptReply(reply, op);
   } catch (error) {
     queuedAction = null;
+    if (!connectionLost) audio.play("error");
     connectionLost = true;
     notice(error.message);
   }
@@ -567,6 +608,7 @@ async function command(op, fields) {
 }
 
 get("play-local").addEventListener("click", () => {
+  audio.play("start");
   screen = "local";
   selected = null;
   setOrder();
@@ -601,7 +643,7 @@ get("start-turn").addEventListener("click", () => {
   sendAction({ type: "ready" });
   focusBoard();
 });
-for (const id of ["deploy", "fire", "forward", "phase-jump", "ascension-strike"]) {
+for (const id of targetOrders) {
   get(id).addEventListener("click", () => {
     setOrder(order === id ? "move" : id);
     if (order === "deploy") selected = null;
@@ -609,7 +651,7 @@ for (const id of ["deploy", "fire", "forward", "phase-jump", "ascension-strike"]
     if (order !== "move") focusBoard();
   });
 }
-for (const type of ["occupy", "salvage", "fortify", "strike", "withdraw"]) {
+for (const type of tileOrders) {
   get(type).addEventListener("click", () => {
     const action = legalCommands().options.find((candidate) => candidate.type === type);
     if (action) sendAction(action);
@@ -667,6 +709,63 @@ get("battle").addEventListener("keydown", (event) => {
   }
 });
 get("rules-button").addEventListener("click", () => get("rules-dialog").showModal());
+get("settings-button").addEventListener("click", () => get("settings-dialog").showModal());
+const proxyDesign = get("proxy-design");
+try {
+  if (localStorage.getItem("nexus-proxy-design") === "classic") proxyDesign.value = "classic";
+} catch {
+  // Use the default design when browser storage is unavailable.
+}
+view.setProxyDesign(proxyDesign.value);
+proxyDesign.addEventListener("change", () => {
+  view.setProxyDesign(proxyDesign.value);
+  try {
+    localStorage.setItem("nexus-proxy-design", proxyDesign.value);
+  } catch {
+    // Keep the design selected for the current page.
+  }
+});
+get("enable-terminal").addEventListener("change", render);
+get("terminal-button").addEventListener("click", () => {
+  if (!terminalAvailable()) return;
+  terminalTurn = { number: game.turn, side: game.activeSide };
+  text("terminal-side", `${sideName(terminalTurn.side)} · Local match`);
+  get("terminal-output").replaceChildren();
+  terminalOutput("Type help to list commands.");
+  get("terminal-input").value = "";
+  terminalDialog.showModal();
+  renderClock();
+});
+get("terminal-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (!terminalDialog.open || !terminalAvailable() || terminalTurn?.number !== game.turn) return;
+  const input = get("terminal-input");
+  const { error, message } = runTestCommand(game, terminalTurn.side, input.value);
+  terminalOutput(`> ${input.value}`);
+  terminalOutput(error ?? message, !!error);
+  audio.play(error ? "error" : "select");
+  input.value = "";
+  input.focus();
+  render();
+});
+
+for (const channel of ["effects", "music"]) {
+  const slider = get(`${channel}-volume`);
+  slider.value = audio.volumes[channel];
+  text(`${channel}-level`, `${slider.value}%`);
+  slider.addEventListener("input", () => {
+    audio.setVolume(channel, Number(slider.value));
+    text(`${channel}-level`, `${slider.value}%`);
+  });
+}
+document.addEventListener("click", (event) => {
+  if (event.isTrusted) audio.unlock();
+  if (event.target instanceof Element && event.target.closest("button, summary")) audio.play("ui");
+}, true);
+document.addEventListener("keydown", (event) => {
+  if (event.isTrusted && !event.repeat) audio.unlock();
+}, true);
+
 get("zoom-out").addEventListener("click", () => view.zoomBy(-.35));
 get("zoom-fit").addEventListener("click", () => view.fit());
 get("zoom-in").addEventListener("click", () => view.zoomBy(.35));
