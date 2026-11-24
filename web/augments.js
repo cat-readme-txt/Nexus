@@ -1,35 +1,43 @@
 export const AUGMENTS = [
   {
     id: "hop", name: "Hop", price: 5,
-    description: "Jump one Proxy over adjacent units in a chain. The entire move costs 1 TV.",
+    description: "Unlock hops immediately. Select an active Proxy to see legal landings. Confirm a chain for 1 TV each time you use it.",
+    iconPath: "M4 20h3m12 0h3M5 16C8 7 15 5 21 12m-5-1 5 1 1-5",
   },
   {
     id: "ascension", name: "Ascension", price: 10,
     description: "From turn 6, your first capture by Move each turn refunds 1 TV. From turn 12, capture up to two reachable hexes away. From turn 18, Move up to two hexes even to an empty hex. Moving from Turbulence suppresses these bonuses.",
+    iconPath: "M7 9l6-6 6 6m-12 7 6-6 6 6m-12 7 6-6 6 6",
   },
   {
     id: "overload", name: "Capacitor Overload", price: 30,
     description: "After activation, bank half the TV you end the turn with. The bonus can exceed the normal cap on your next turn.",
+    iconPath: "M4 17h5m0-4v8m8-8v8m0-4h5M14 3l-4 6h5l-3 4",
   },
   {
     id: "void", name: "The Call of Void", price: 0,
     description: "Send 30 free Proxies to your Cradle or reserve. Give up all other augments and lower your TV cap to 20.",
+    iconPath: "M23 13a10 10 0 1 1-20 0 10 10 0 0 1 20 0ZM18 8a6 6 0 0 0-8 9 6 6 0 0 0 8-9Z",
   },
   {
     id: "emp", name: "Electromagnetic Pulse", price: 10,
     description: "Disable enemy Aegis and Obelisk shields for the rest of the round. Vanguards stay online.",
+    iconPath: "M6 5a11 11 0 0 0 0 16m3-13a7 7 0 0 0 0 10m11-13a11 11 0 0 1 0 16m-3-13a7 7 0 0 1 0 10M13 12v2",
   },
   {
     id: "disabler", name: "Troop Disabler", price: 10,
     description: "Block the enemy from receiving new Proxies on their next turn. They can still deploy their existing reserve.",
+    iconPath: "M22 13a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM7 19 19 7",
   },
   {
     id: "defensive", name: "Defensive Strike", price: 5,
     description: "Hit up to three enemy Proxies anywhere in your own territory. Fortification can absorb the hit.",
+    iconPath: "M13 3l8 4v5c0 5-4 8-8 11-4-3-8-6-8-11V7l8-4ZM9 12h8m-4-4v8",
   },
   {
     id: "retaliation", name: "Deadly Retaliation", price: 10,
     description: "On the enemy’s next turn, drain up to 5 TV for each of your Proxies they capture by Move or target with Defensive Strike.",
+    iconPath: "M4 10h11a6 6 0 0 1 0 12h-4M9 5l-5 5 5 5m11-12 2 3 2-3",
   },
 ];
 

@@ -58,12 +58,14 @@ test("an augment requires a claimed, staffed Deposit at purchase and can be used
   assert.match(buy(game, "emp"), /unavailable/);
 });
 
-test("Hop commits a chain over different sides for one movement cost and rejects a broken chain", () => {
+test("buying Hop immediately unlocks repeatable chains for 1 TV each", () => {
   const game = scenario();
   for (const id of [10, 35]) placeProxy(game, id);
   placeProxy(game, 85, "red");
+  assert.deepEqual(hopTargets(game, 10), []);
   assert.equal(buy(game, "hop"), null);
-  assert.deepEqual(hopTargets(game, 10, []), [60]);
+  assert.equal(augmentStatus(game, "blue", "hop"), "active");
+  assert.deepEqual(hopTargets(game, 10), [60]);
   assert.deepEqual(hopTargets(game, 10, [60]), [110]);
   assert.match(play(game, { type: "hop", augment: "hop", from: 10, path: [60, 85] }), /legal hop/);
   assert.equal(game.players.blue.tv, 25);
@@ -72,7 +74,27 @@ test("Hop commits a chain over different sides for one movement cost and rejects
   assert.equal(game.proxies[10], undefined);
   assert.equal(game.proxies[110].side, "blue");
   assert.equal(game.proxies[85].side, "red");
-  assert.equal(augmentStatus(game, "blue", "hop"), "used");
+  assert.equal(play(game, { type: "hop", augment: "hop", from: 110, path: [60, 10] }), null);
+  assert.equal(game.players.blue.tv, 23);
+  assert.equal(game.proxies[10].side, "blue");
+  assert.equal(game.stats.blue.augmentUses, 2);
+  giveTurn(game);
+  giveTurn(game);
+  assert.equal(augmentStatus(game, "blue", "hop"), "active");
+  assert.deepEqual(hopTargets(game, 10), [60]);
+});
+
+test("Hop carries forward from earlier matches and The Call of Void removes it", () => {
+  const game = scenario();
+  for (const id of [10, 35]) placeProxy(game, id);
+  for (const status of ["ready", "used"]) {
+    game.players.blue.augments = { inventory: { hop: status } };
+    assert.equal(augmentStatus(game, "blue", "hop"), "active");
+    assert.deepEqual(hopTargets(game, 10), [60]);
+  }
+  assert.equal(buy(game, "void"), null);
+  assert.equal(augmentStatus(game, "blue", "hop"), "locked");
+  assert.deepEqual(hopTargets(game, 10), []);
 });
 
 test("Ascension unlocks its tiers using the player's turns and leaves core actions in Turbulence", () => {

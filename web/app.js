@@ -1,13 +1,14 @@
 import { AUGMENTS } from "./augments.js";
 import { createGameAudio } from "./audio.js";
-import { sideName, SIDES, tileLabel, tileName, tiles } from "./board.js";
+import { sideName, SIDES, tileLabel, tileName, tiles, wallsBySource } from "./board.js";
 import { createBoardView, IMPACT_MS } from "./board-view.js";
 import { renderHexInspector } from "./hex-inspector.js";
 import { renderReview, renderStats, speciesCards } from "./match-views.js";
 import { onlineAvailable, savedOnlineSession, sendOnline } from "./online.js";
+import { PROXY_SKINS, proxySkin } from "./proxy-skins.js";
 import { runTestCommand } from "./terminal.js";
 import {
-  advanceClock, allProxies, applyAction, augmentBuyError, augmentEffects, augmentStatus,
+  ACTION_COST, advanceClock, allProxies, applyAction, augmentBuyError, augmentEffects, augmentStatus,
   canFireFrom, concedeGame, createGame, defensiveTargets, deploymentCost, fabricationError,
   forwardActions, freeReserve, hasAugmentDeposit, hopTargets,
   obeliskFireCost, obeliskRange, placementActions, proxyActions, readyProxy, STARTING_PROXIES, TURN_SECONDS,
@@ -37,6 +38,10 @@ const leaveDialog = get("leave-dialog");
 const augmentDialog = get("augments-dialog");
 const terminalDialog = get("terminal-dialog");
 const audio = createGameAudio();
+const proxyDesign = get("proxy-design");
+const skinKeys = { blue: "nexus-proxy-design", red: "nexus-red-proxy-design" };
+const localSkins = Object.fromEntries(SIDES.map((side) => [side, readSkin(skinKeys[side])]));
+let onlineSkins = {};
 let terminalTurn = null;
 let queuedAction = null;
 let selectionReady = false;
@@ -98,20 +103,55 @@ function terminalOutput(message, error = false) {
   output.scrollTop = output.scrollHeight;
 }
 
+function readSkin(key) {
+  try {
+    return proxySkin(localStorage.getItem(key));
+  } catch {
+    return proxySkin();
+  }
+}
+
+function rememberSkin(side, skin) {
+  localSkins[side] = skin;
+  try {
+    localStorage.setItem(skinKeys[side], skin);
+  } catch {
+    // Keep the preference in this page when browser storage is unavailable.
+  }
+}
+
+function renderSkinSetting() {
+  const local = screen === "local";
+  const online = screen === "online";
+  const side = online ? seat : local ? game.activeSide : "blue";
+  const localHandoff = local && (game.phase === "species" ? !selectionReady : game.deadline === null);
+  text("proxy-design-label", local || online ? `${sideName(side)} Proxy skin` : "Default Proxy skin");
+  text("proxy-design-help", localHandoff ? "Available when you take your turn."
+    : local || online ? `Applies to ${sideName(side)}’s Proxies.`
+      : "Used for Blue in pass-and-play and for your seat online.");
+  proxyDesign.value = proxySkin((online ? onlineSkins : localSkins)[side]);
+  proxyDesign.disabled = localHandoff || screen === "waiting" || (online && pending);
+}
+
+function hopLandings(path) {
+  return hopTargets(game, selected, path).map((to) => ({ to, type: "hop-target", cost: ACTION_COST.move }));
+}
+
 function legalCommands() {
   if (!usableTurn()) return { targets: [], options: [], forward: [] };
   if (game.phase === "setup" || order === "deploy") {
     return { targets: placementActions(game), options: [], forward: [] };
   }
-  if (targeting()) {
-    const ids = order === "hop" ? hopTargets(game, selected, plan) : defensiveTargets(game, game.activeSide);
-    const type = order === "hop" ? "hop-target" : "defensive-target";
-    return { targets: ids.map((to) => ({ to, type, cost: order === "hop" ? 1 : 0 })), options: [], forward: [] };
+  if (order === "hop") return { targets: hopLandings(plan), options: [], forward: [] };
+  if (order === "defensive") {
+    const targets = defensiveTargets(game, game.activeSide).map((to) => ({ to, type: "defensive-target", cost: 0 }));
+    return { targets, options: [], forward: [] };
   }
   const options = proxyActions(game, selected);
   const forward = forwardActions(game, selected);
   const targets = order === "forward" ? forward
     : options.filter(({ type }) => type === order);
+  if (order === "move") targets.push(...hopLandings());
   return { targets, options, forward };
 }
 
@@ -198,14 +238,22 @@ function choose(id) {
   if (targeting()) {
     audio.play("select");
     if (order === "hop") {
-      if (id === plan.at(-1)) plan.pop();
-      else if (action) plan.push(id);
-      else if (!plan.length && game.proxies[id]?.side === game.activeSide && readyProxy(game, id)) selected = id;
+      if (id === plan.at(-1)) {
+        plan.pop();
+        if (!plan.length) setOrder();
+      } else if (action) plan.push(id);
     } else if (plan.includes(id)) {
       plan = plan.filter((target) => target !== id);
     } else if (action && plan.length < 3) {
       plan.push(id);
     }
+    render();
+    return;
+  }
+  if (action?.type === "hop-target") {
+    audio.play("select");
+    setOrder("hop");
+    plan.push(id);
     render();
     return;
   }
@@ -280,7 +328,7 @@ function renderClock() {
   get("timer-bar").style.transform = `scaleX(${Math.min(1, remaining / (TURN_SECONDS * 1000))})`;
 }
 
-function ordersDescription() {
+function ordersDescription(hasHopLanding) {
   if (game.phase === "finished") return "Match complete.";
   if (game.deadline === null) return "Pass the device to the next player.";
   if (screen === "online" && seat !== game.activeSide) return "Waiting for your opponent.";
@@ -293,13 +341,10 @@ function ordersDescription() {
   if (order === "forward") return "Choose a highlighted hex beside the Aegis.";
   if (order === "phase-jump") return "Choose an open landing hex.";
   if (order === "defensive") return `${plan.length} of 3 targets selected. Choose enemy Proxies in your territory.`;
-  if (order === "hop") {
-    if (plan.length) return "Choose another landing or confirm the hop. Select the last landing to undo it.";
-    if (hopTargets(game, selected, []).length) return "Choose a highlighted hex to jump over the adjacent Proxy.";
-    return "Select an active Proxy with a valid jump.";
-  }
+  if (order === "hop") return "Choose another landing or confirm the hop. Select the last landing to undo it.";
   if (game.players[game.activeSide].tv === 0) return "Select a Proxy on an Aegis to capture it for free, or end your turn.";
   if (selected !== null && game.proxies[selected]?.side === game.activeSide) {
+    if (hasHopLanding) return "Choose a Move destination or a highlighted Hop landing.";
     return readyProxy(game, selected) ? "Choose a highlighted hex to move. Moving onto an enemy Proxy captures it."
       : "This Proxy can act starting on your next turn.";
   }
@@ -308,6 +353,16 @@ function ordersDescription() {
 
 function augmentRow(augment) {
   const row = document.createElement("li");
+  const icon = document.createElement("canvas");
+  icon.className = "augment-icon";
+  icon.width = icon.height = 52;
+  icon.setAttribute("aria-hidden", "true");
+  const drawing = icon.getContext("2d");
+  drawing.scale(2, 2);
+  drawing.strokeStyle = "#f1d18c";
+  drawing.lineWidth = 1.6;
+  drawing.lineCap = drawing.lineJoin = "round";
+  drawing.stroke(new Path2D(augment.iconPath));
   const name = document.createElement("h3");
   const description = document.createElement("p");
   const details = document.createElement("div");
@@ -317,7 +372,7 @@ function augmentRow(augment) {
   details.append(name, description);
   control.type = "button";
   control.addEventListener("click", () => chooseAugment(augment.id));
-  row.append(details, control);
+  row.append(icon, details, control);
   get("augment-list").append(row);
   return { augment, row, control };
 }
@@ -329,8 +384,8 @@ function chooseAugment(id) {
     sendAction({ type: "buy-augment", augment: id });
   } else if (status === "ready") {
     augmentDialog.close();
-    if (id === "hop" || id === "defensive") {
-      if (id === "defensive") selected = null;
+    if (id === "defensive") {
+      selected = null;
       setOrder(id);
       render();
       get("board").focus({ preventScroll: true });
@@ -352,12 +407,11 @@ function renderAugments() {
     row.dataset.state = state;
     if (state === "ready") ready += 1;
     const buyError = state === "available" && augmentBuyError(game, side, id, deposit);
-    const canUse = state === "ready" && (id !== "hop" || player.tv > 0)
-      && (id !== "defensive" || defensiveTargets(game, side).length > 0);
+    const canUse = state === "ready" && (id !== "defensive" || defensiveTargets(game, side).length > 0);
     control.disabled = !acting || !(canUse || (state === "available" && !buyError));
     control.textContent = {
       available: id === "void" ? "Invoke · 0 TV" : `Buy · ${price} TV`,
-      ready: id === "hop" ? "Plan hop" : id === "defensive" ? "Choose targets" : "Activate",
+      ready: id === "defensive" ? "Choose targets" : "Activate",
       used: "Spent", active: "Active", locked: "Locked",
     }[state];
     control.title = buyError || "";
@@ -409,7 +463,8 @@ function renderMatch() {
   const canOrder = usableTurn() && !setup;
   const showOrders = !setup && !finished && !handoff && (screen === "local" || game.activeSide === seat);
   const { targets, options, forward } = legalCommands();
-  text("orders-description", ordersDescription());
+  const hasHopLanding = targets.some(({ type }) => type === "hop-target");
+  text("orders-description", ordersDescription(hasHopLanding));
   const available = (type) => options.find((action) => action.type === type);
   const fireAvailable = showOrders && canFireFrom(game, selected);
   const firingRange = fireAvailable && order === "fire" ? obeliskRange(game, selected).map(({ to }) => to) : [];
@@ -421,6 +476,8 @@ function renderMatch() {
   button("fire", !canOrder || game.players[game.activeSide].tv < fireCost);
   text("fire-cost", `${fireCost} TV`);
   hide("range-key", !fireAvailable || order !== "fire");
+  hide("hop-key", !hasHopLanding);
+  hide("linked-shield-key", !wallsBySource.has(inspected));
   hide("forward", !forward.length);
   const claim = available("occupy");
   text("occupy-label", claim && tiles.get(claim.to).node.type !== "deposit" ? "Capture" : "Occupy");
@@ -451,13 +508,14 @@ function renderMatch() {
   renderHexInspector(get("hex-inspector"), game, inspected);
   if (get("live-stats").open) renderStats(get("live-stats-table"), game);
   view.render(game, { selected, inspect: inspected, actions: targets,
-    planned: plan, mode: order, firingRange });
+    planned: plan, mode: order, firingRange, playerSkins: screen === "online" ? onlineSkins : localSkins });
   renderClock();
 }
 
 function render() {
   document.body.dataset.screen = screen;
   audio.sync(game, seat);
+  renderSkinSetting();
   const canOpenTerminal = terminalAvailable();
   hide("terminal-button", !canOpenTerminal);
   if (terminalDialog.open && (!canOpenTerminal || terminalTurn?.number !== game.turn)) terminalDialog.close();
@@ -571,7 +629,13 @@ async function exchange(op, fields) {
     clockOffset = reply.serverTime - (start + Date.now()) / 2;
     if (connectionLost) notice("");
     connectionLost = false;
-    if (op === "poll" && screen === "online" && reply.room === room && !reply.game && !reply.error) {
+    let skinsChanged = false;
+    if (reply.status === "match") {
+      const nextSkins = Object.fromEntries(SIDES.map((side) => [side, proxySkin(reply.proxySkins?.[side])]));
+      skinsChanged = SIDES.some((side) => nextSkins[side] !== onlineSkins[side]);
+      onlineSkins = nextSkins;
+    }
+    if (op === "poll" && screen === "online" && reply.room === room && !reply.game && !reply.error && !skinsChanged) {
       renderClock();
       return;
     }
@@ -618,11 +682,11 @@ get("play-local").addEventListener("click", () => {
   render();
   get("start-selection").focus();
 });
-get("find-match").addEventListener("click", () => { void command("find"); });
-get("create-room").addEventListener("click", () => { void command("create"); });
+get("find-match").addEventListener("click", () => { void command("find", { skin: localSkins.blue }); });
+get("create-room").addEventListener("click", () => { void command("create", { skin: localSkins.blue }); });
 get("join-room").addEventListener("submit", (event) => {
   event.preventDefault();
-  void command("join", { code: get("room-input").value });
+  void command("join", { code: get("room-input").value, skin: localSkins.blue });
 });
 get("copy-code").addEventListener("click", async () => {
   try {
@@ -710,20 +774,12 @@ get("battle").addEventListener("keydown", (event) => {
 });
 get("rules-button").addEventListener("click", () => get("rules-dialog").showModal());
 get("settings-button").addEventListener("click", () => get("settings-dialog").showModal());
-const proxyDesign = get("proxy-design");
-try {
-  if (localStorage.getItem("nexus-proxy-design") === "classic") proxyDesign.value = "classic";
-} catch {
-  // Use the default design when browser storage is unavailable.
-}
-view.setProxyDesign(proxyDesign.value);
 proxyDesign.addEventListener("change", () => {
-  view.setProxyDesign(proxyDesign.value);
-  try {
-    localStorage.setItem("nexus-proxy-design", proxyDesign.value);
-  } catch {
-    // Keep the design selected for the current page.
-  }
+  const skin = proxyDesign.value;
+  if (proxyDesign.disabled || !PROXY_SKINS.has(skin)) return;
+  rememberSkin(screen === "local" ? game.activeSide : "blue", skin);
+  if (screen === "online") void command("skin", { room, skin });
+  else render();
 });
 get("enable-terminal").addEventListener("change", render);
 get("terminal-button").addEventListener("click", () => {

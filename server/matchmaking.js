@@ -1,4 +1,5 @@
 import { advanceClock, applyAction, concedeGame, createGame, restoreLegacyMove } from "../web/rules.js";
+import { PROXY_SKINS, proxySkin } from "../web/proxy-skins.js";
 
 const QUEUE_LEASE = 90_000;
 const INVITE_LEASE = 20 * 60_000;
@@ -6,7 +7,7 @@ const MATCH_LEASE = 2 * 60 * 60_000;
 const MAX_ROOMS = 128;
 const TOKEN_PATTERN = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const CODE_PATTERN = /^[0-9A-F]{8}$/;
-const OPERATIONS = new Set(["find", "create", "join", "poll", "action", "concede", "leave", "cancel"]);
+const OPERATIONS = new Set(["find", "create", "join", "poll", "action", "skin", "concede", "leave", "cancel"]);
 
 export function createLobby() {
   return { rooms: {}, membership: {}, queued: null };
@@ -20,13 +21,13 @@ function removeRoom(lobby, room) {
   delete lobby.rooms[room.code];
 }
 
-function availableRoom(lobby, token, kind, now) {
+function availableRoom(lobby, token, kind, now, skin) {
   let code;
   do {
     code = crypto.randomUUID().slice(0, 8).toUpperCase();
   } while (lobby.rooms[code]);
   const room = {
-    code, kind, seats: { blue: token }, game: null,
+    code, kind, seats: { blue: token }, game: null, proxySkins: { blue: proxySkin(skin) },
     expires: now + (kind === "queue" ? QUEUE_LEASE : INVITE_LEASE),
   };
   lobby.rooms[code] = room;
@@ -35,8 +36,9 @@ function availableRoom(lobby, token, kind, now) {
   return room;
 }
 
-function matchPlayer(lobby, room, token, now) {
+function matchPlayer(lobby, room, token, now, skin) {
   room.seats.red = token;
+  (room.proxySkins ??= {}).red = proxySkin(skin);
   room.game = createGame({ now });
   room.expires = now + MATCH_LEASE;
   lobby.membership[token] = room.code;
@@ -82,12 +84,12 @@ export function processMatch(lobby, request, now) {
       error = "That room is unavailable. Check the code or ask for a new one.";
     } else if (op === "join" || (op === "find" && open)) {
       room = op === "join" ? invite : open;
-      matchPlayer(lobby, room, token, now);
+      matchPlayer(lobby, room, token, now, request.skin);
       changed = true;
     } else if (Object.keys(lobby.rooms).length >= MAX_ROOMS) {
       error = "All online rooms are in use. Try again in a moment.";
     } else {
-      room = availableRoom(lobby, token, op === "find" ? "queue" : "invite", now);
+      room = availableRoom(lobby, token, op === "find" ? "queue" : "invite", now, request.skin);
       changed = true;
     }
   }
@@ -131,6 +133,16 @@ export function processMatch(lobby, request, now) {
       }
     }
   }
+  if (op === "skin") {
+    if (!room?.game || room.code !== request.room) {
+      error = "That match has ended.";
+    } else if (!PROXY_SKINS.has(request.skin)) {
+      error = "Choose a valid Proxy skin.";
+    } else if (room.proxySkins?.[side] !== request.skin) {
+      (room.proxySkins ??= {})[side] = request.skin;
+      changed = true;
+    }
+  }
 
   let response = { status: "idle", serverTime: now };
   if (room?.game) {
@@ -138,6 +150,7 @@ export function processMatch(lobby, request, now) {
     response = {
       status: "match", room: room.code, side,
       game: unchanged ? null : gameForPlayer(room.game, side), serverTime: now,
+      proxySkins: { blue: proxySkin(room.proxySkins?.blue), red: proxySkin(room.proxySkins?.red) },
     };
   } else if (room) {
     if (room.kind === "queue" && room.expires < now + QUEUE_LEASE / 2) {

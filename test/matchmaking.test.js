@@ -71,6 +71,30 @@ test("an invite needs its code, survives polling, and handles concessions", () =
   assert.equal(Object.keys(lobby.rooms).length, 0);
 });
 
+test("online skins belong to each seat and cosmetic changes leave order revisions usable", () => {
+  const lobby = createLobby();
+  const a = client(lobby, blue);
+  const b = client(lobby, red);
+  a("find", { skin: "drone" });
+  const { room, proxySkins } = b("find", { skin: "classic" });
+  assert.deepEqual(proxySkins, { blue: "drone", red: "classic" });
+  pick(a, room, "directorate");
+  const setup = pick(b, room, "keth").game;
+  const request = { room, skin: "disc", side: "blue" };
+  assert.match(client(lobby, guest)("skin", request).error, /ended/);
+  assert.match(b("skin", { ...request, skin: "unknown" }).error, /valid Proxy skin/);
+  const result = b("skin", request);
+  assert.deepEqual(result.proxySkins, { blue: "drone", red: "disc" });
+  assert.equal(result.game.revision, setup.revision);
+  assert.equal(result.game.deadline, setup.deadline);
+  const poll = a("poll", { room, revision: setup.revision });
+  assert.equal(poll.game, null);
+  assert.deepEqual(poll.proxySkins, result.proxySkins);
+  const action = a("action", { room, revision: setup.revision, action: { type: "place", to: cradles.blue[0] } });
+  assert.equal(action.error, undefined);
+  assert.equal(action.game.players.blue.placed, 1);
+});
+
 test("the server advances deadlines and refuses commands from expired revisions", () => {
   const lobby = createLobby();
   const a = client(lobby, blue);

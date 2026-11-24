@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { board, cradles, nexus, nodes, otherSide, sentinels, tiles, vanguards, walls } from "../web/board.js";
+import { board, cradles, edgeKey, nexus, nodes, otherSide, sentinels, tileLabel, tiles, vanguards, walls, wallsBySource } from "../web/board.js";
 import {
   advanceClock, applyAction, baseShieldActive, createGame, nodeController, placementActions,
   obeliskRange, proxyActions, readyProxy, TURN_SECONDS, wallActive,
@@ -30,11 +30,8 @@ test("the competition layout preserves playable hexes, nodes, and adjacent shiel
   assert.equal(nodes.filter(({ node }) => node.type === "deposit").length, 9);
   assert.deepEqual([sentinels.blue.length, sentinels.red.length], [8, 8]);
   assert.equal(walls.length, 251);
+  assert.equal(new Set(walls.map(({ from, to }) => edgeKey(from, to))).size, walls.length);
   const game = createGame({ now: start });
-  const center = (id) => {
-    const { column, row } = tiles.get(id);
-    return [3 * column, 2 * row - column % 2];
-  };
   for (const tile of board) {
     for (const neighbor of tile.neighbors.filter((id) => id !== null)) {
       assert(tiles.get(neighbor).neighbors.includes(tile.id));
@@ -44,14 +41,61 @@ test("the competition layout preserves playable hexes, nodes, and adjacent shiel
     assert(tiles.get(wall.from).neighbors.includes(wall.to));
     assert.equal(tiles.get(wall.source).node.home, wall.side);
     assert(wallActive(game, wall));
-    const home = center(nexus[wall.side]);
-    const enemy = center(nexus[otherSide(wall.side)]);
-    const project = (id) => {
-      const [x, y] = center(id);
-      return x * (enemy[0] - home[0]) + 3 * y * (enemy[1] - home[1]);
-    };
-    assert(project(wall.from) + project(wall.to) > 2 * project(wall.source));
   }
+});
+
+test("capturing a wide generator shuts down all four hexes of its printed arc", () => {
+  const wideArcs = [
+    [4, ["D1", "D2", "E2", "F2"], 9],
+    [76, ["A3", "B3", "C3", "C4"], 8],
+    [84, ["I3", "I4", "J5", "K4"], 10],
+    [94, ["S3", "S4", "T5", "U4"], 10],
+    [130, ["E5", "F5", "G5", "G6"], 10],
+    [219, ["S8", "S9", "T10", "U9"], 10],
+    [265, ["O10", "P10", "Q10", "Q11"], 10],
+    [273, ["W10", "W11", "X12", "Y11"], 8],
+    [320, ["T13", "U12", "V13", "V14"], 9],
+  ];
+  for (const [source, expectedHexes, expectedBorders] of wideArcs) {
+    const game = playGame();
+    const { node, neighbors } = tiles.get(source);
+    const arc = wallsBySource.get(source);
+    const hexes = new Set(arc.flatMap(({ from, to }) => [from, to]).filter((id) => neighbors.includes(id)).map(tileLabel));
+    assert.deepEqual([...hexes].sort(), [...expectedHexes].sort(), tileLabel(source));
+    assert.equal(arc.length, expectedBorders, tileLabel(source));
+    assert(arc.every((wall) => wallActive(game, wall)));
+
+    const attacker = otherSide(node.home);
+    game.activeSide = attacker;
+    game.players[attacker].tv = 6;
+    proxy(game, source, attacker);
+    assert.equal(applyAction(game, attacker, cost("occupy", source, source), start), null);
+    assert(arc.every((wall) => !wallActive(game, wall)), tileLabel(source));
+    assert(walls.every((wall) => wall.source === source || wallActive(game, wall)));
+  }
+});
+
+test("a fourth-hex return opens to enemy movement and closes after recapture", () => {
+  const game = playGame();
+  const generator = 4; // E1
+  const inner = 30; // F2
+  const outer = 31; // G2
+  const edge = walls.find(({ from, to }) => from === inner && to === outer);
+  game.activeSide = "red";
+  game.players.red.tv = 6;
+  proxy(game, generator, "red");
+  proxy(game, outer, "red");
+
+  assert.equal(edge.source, generator);
+  assert.match(applyAction(game, "red", cost("move", outer, inner), start), /unavailable/);
+  assert.equal(applyAction(game, "red", cost("occupy", generator, generator), start), null);
+  assert.equal(applyAction(game, "red", cost("move", outer, inner), start), null);
+  assert.equal(applyAction(game, "red", cost("move", generator, 5), start), null);
+  assert(!wallActive(game, edge));
+  assert.equal(applyAction(game, "red", { type: "end" }, start), null);
+  proxy(game, generator, "blue");
+  assert.equal(applyAction(game, "blue", cost("occupy", generator, generator), start), null);
+  assert(wallActive(game, edge));
 });
 
 test("a local match hands off setup and gives Blue the first fueled turn", () => {

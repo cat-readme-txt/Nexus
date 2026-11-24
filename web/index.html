@@ -132,7 +132,9 @@
         <span><i class="swatch turbulence"></i>Turbulence</span>
         <span><i class="swatch shield"></i>Shield up</span>
         <span><i class="swatch shield idle"></i>Shield down</span>
+        <span id="linked-shield-key" hidden><i class="swatch shield linked"></i>Inspected links</span>
         <span id="range-key" hidden><i class="swatch range"></i>Obelisk range</span>
+        <span id="hop-key" hidden><i class="swatch hop"></i>Hop landing</span>
         <span><i class="swatch cache"></i>Salvage cache</span>
       </div>
     </section>
@@ -217,13 +219,17 @@
       <label class="volume-control" for="music-volume">
         <span>Background music</span><input id="music-volume" type="range" min="0" max="100"><output id="music-level" for="music-volume"></output>
       </label>
-      <label class="design-control" for="proxy-design">
-        <span>Proxy design</span>
-        <select id="proxy-design">
-          <option value="drone">Drone</option>
-          <option value="classic">Classic shield</option>
-        </select>
-      </label>
+      <div>
+        <label class="design-control" for="proxy-design">
+          <span id="proxy-design-label">Proxy skin</span>
+          <select id="proxy-design" aria-describedby="proxy-design-help">
+            <option value="disc">Disc</option>
+            <option value="drone">Drone</option>
+            <option value="classic">Classic shield</option>
+          </select>
+        </label>
+        <p id="proxy-design-help" class="settings-hint muted"></p>
+      </div>
       <div class="test-setting">
         <label><input type="checkbox" id="enable-terminal" aria-describedby="terminal-help"> Enable testing terminal</label>
         <p id="terminal-help" class="muted">After setup, Testing terminal appears in the top bar during each active pass-and-play turn.</p>
@@ -268,10 +274,12 @@
       </dl>
       <p>Occupied special hexes show an inlay around the Proxy. Look for a crown on a Nexus, side brackets on a Vanguard, pointed chevrons on an Obelisk, flat bars on an Aegis, a gold ring on a Deposit, or a teal diamond on a cache. Select any hex to see its rules and occupants.</p>
       <p>Fabricate a reserve Proxy for 2 TV with fewer than two active Proxies, once every three turns. Salvage caches surface in Turbulence every third round. An active Proxy can recover one for 2 TV.</p>
-      <p>Aegis and Obelisk borders start powered. Each node powers the borders it sends toward the enemy Nexus. Capture shuts down those borders until the original side recaptures the node. Select a generator to see its linked borders.</p>
+      <p>Aegis and Obelisk borders start powered. Some arcs cover three neighboring hexes and wider arcs cover four. Capture shuts down the entire linked arc until the original side recaptures its generator. Solid borders are powered. Dashed borders mark where offline shields will return. Select a generator to outline its linked borders.</p>
+      <p>A solid gold ring around a Nexus marks its active Vanguard shield. A small gold hexagon around a Proxy marks Keth armor, which absorbs one Obelisk or Defensive Strike hit.</p>
       <p>A staffed Aegis can deploy a reserve Proxy to an open neighboring hex for 1 TV. Its shields drop until your next turn. Keep a Proxy on a newly occupied Deposit until your next turn to secure control.</p>
       <p>Species abilities are explained when you choose. Board effects are visible, and the match review reveals both picks.</p>
       <p>Hold a Deposit with an active Proxy to buy augments. Use a purchased augment on one of your turns, even if you later lose the Deposit.</p>
+      <p>Buying Hop unlocks it for the match. Select an active Proxy and look for violet diamonds. Pick one or more landings, then confirm the entire chain for 1 TV.</p>
       <p class="muted">Use Q, W, E, A, S, and D to move around the board with a keyboard. Enter selects a hex.</p>
     </div>
   </dialog>

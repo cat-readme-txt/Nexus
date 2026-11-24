@@ -19,7 +19,7 @@ const ACTION_SOUNDS = {
   place: "place", spawn: "deploy", "forward-deploy": "deploy", fabricate: "fabricate",
   salvage: "salvage", fortify: "fortify", fire: "fire", "phase-jump": "phase-jump",
 };
-const AUGMENT_SOUNDS = { hop: "hop", defensive: "strike", emp: "emp" };
+const AUGMENT_SOUNDS = { defensive: "strike", emp: "emp" };
 const HIT_STATS = { move: "moveCaptures", fire: "obeliskShots", defensive: "defensiveStrikes" };
 
 export function createGame({ now = Date.now(), passAndPlay = false, selectSpecies = true } = {}) {
@@ -497,7 +497,10 @@ export function hasAugmentDeposit(game, side) {
 export function augmentStatus(game, side, id) {
   const state = game.players[side].augments;
   if (state?.void) return id === "void" ? "active" : "locked";
-  return state?.inventory[id] ?? "available";
+  const status = state?.inventory[id];
+  // Older matches could have purchased Hop as a single-use augment.
+  if (id === "hop" && (status === "ready" || status === "used")) return "active";
+  return status ?? "available";
 }
 
 export function augmentBuyError(game, side, id, hasDeposit = hasAugmentDeposit(game, side)) {
@@ -514,6 +517,7 @@ export function augmentEffects(game, side) {
   const state = game.players[side].augments;
   const labels = [];
   if (state?.void) labels.push("Void · 20 TV cap");
+  if (augmentStatus(game, side, "hop") === "active") labels.push("Hop");
   if (state?.inventory.ascension === "active") labels.push("Ascension");
   if (state?.overloadArmed) labels.push("Overload armed");
   if (state?.bankedTV) labels.push(`${state.bankedTV} TV banked`);
@@ -527,7 +531,7 @@ function buyAugment(game, side, id) {
   const player = game.players[side];
   spend(game, side, AUGMENT_BY_ID.get(id).price);
   const state = player.augments ??= { inventory: {} };
-  state.inventory[id] = "ready";
+  state.inventory[id] = id === "hop" ? "active" : "ready";
   if (id === "void") {
     record(game, side, "augmentUses");
     player.augments = { inventory: {}, void: true, freeProxies: VOID_REINFORCEMENTS };
@@ -578,7 +582,7 @@ function nextHops(game, side, from, visited) {
 
 function hopRoute(game, from, path) {
   const side = game.activeSide;
-  if (!tiles.has(from) || !activeProxyTurn(game, from) || augmentStatus(game, side, "hop") !== "ready"
+  if (!tiles.has(from) || !activeProxyTurn(game, from) || augmentStatus(game, side, "hop") !== "active"
       || game.players[side].tv < ACTION_COST.move || !Array.isArray(path) || path.length >= tiles.size) return null;
   const visited = new Set([from]);
   let current = from;
@@ -590,7 +594,7 @@ function hopRoute(game, from, path) {
   return { current, visited };
 }
 
-export function hopTargets(game, from, path) {
+export function hopTargets(game, from, path = []) {
   const route = hopRoute(game, from, path);
   return route ? nextHops(game, game.activeSide, route.current, route.visited) : [];
 }
@@ -639,17 +643,17 @@ function applyAugment(game, side, action) {
     buyAugment(game, side, augment);
     return null;
   }
-  if (augmentStatus(game, side, augment) !== "ready") return "You don’t have this augment ready.";
-  if (type === "use-augment") return activateAugment(game, side, augment);
   if (type === "hop" && augment === "hop") {
     const route = hopRoute(game, from, path);
     if (!route || !path.length) return "Choose a legal hop route.";
     spend(game, side, ACTION_COST.move);
-    consume(game, side, augment);
-    log(game, `${sideName(side)} hopped ${tileLabel(from)} to ${tileLabel(route.current)}.`);
+    record(game, side, "augmentUses");
+    log(game, `${sideName(side)} hopped ${tileLabel(from)} to ${tileLabel(route.current)}.`, "hop");
     transferProxy(game, from, route.current);
     return null;
   }
+  if (augmentStatus(game, side, augment) !== "ready") return "You don’t have this augment ready.";
+  if (type === "use-augment") return activateAugment(game, side, augment);
   if (type === "defensive-strike" && augment === "defensive") {
     const eligible = defensiveTargets(game, side);
     if (!Array.isArray(targets) || targets.length < 1 || targets.length > 3

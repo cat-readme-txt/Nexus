@@ -71,6 +71,7 @@ export function renderHexInspector(panel, game, id) {
   if (proxy) {
     const status = proxyReady(game, proxy) ? "Active" : "Activates on its owner’s next turn";
     add(`${sideName(proxy.side)} Proxy`, proxy.fortified ? `${status} · fortified` : status);
+    if (proxy.fortified) add("Armor", "Absorbs one Obelisk or Defensive Strike hit");
   } else {
     add("Proxies", "Empty");
   }

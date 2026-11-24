@@ -1,5 +1,6 @@
 import { board, nexus, SIDES, sideName, tileLabel, tileName, tiles, walls } from "./board.js";
 import { NODE_ICONS } from "./hex-inspector.js";
+import { DEFAULT_PROXY_SKIN } from "./proxy-skins.js";
 import { baseShieldActive, nodeController, proxyReady, wallActive } from "./rules.js";
 
 export const IMPACT_MS = 220;
@@ -68,7 +69,7 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
   const flashes = new Map();
   const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
   let order = "move";
-  let proxyDesign = "drone";
+  let playerSkins = {};
   let zoom = 1;
   let frame = 0;
 
@@ -101,6 +102,7 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
     const { x, y } = centers.get(tile.id);
     const proxy = game?.proxies[tile.id];
     const action = targets.get(tile.id);
+    const hop = action?.type === "hop-target";
     const isSelected = tile.id === selection;
     const isInspected = tile.id === inspected;
     const isFocused = tile.id === cursor && document.activeElement === canvas;
@@ -114,11 +116,11 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
     const cache = game?.caches?.includes(tile.id);
 
     hex(x, y, RADIUS * .946);
-    ctx.fillStyle = isSelected || planned ? "#4a412b" : action ? (proxy ? "#512d37" : "#30464d")
+    ctx.fillStyle = isSelected || planned ? "#4a412b" : hop ? "#443759" : action ? (proxy ? "#512d37" : "#30464d")
       : inRange ? "#243c48" : fill;
     ctx.fill();
     ctx.lineWidth = isSelected || isFocused || planned || isInspected ? 2.2 : kind || inRange ? 1.55 : 1.02;
-    ctx.strokeStyle = isSelected || planned ? "#ffe298" : isFocused || isInspected ? "#f3f5ff"
+    ctx.strokeStyle = isSelected || planned ? "#ffe298" : isFocused || isInspected ? "#f3f5ff" : hop ? "#e4b5f5"
       : isHovered ? "#b3c5d9" : inRange ? "#79c9d7" : captured ? team[controller].light
         : kind === "deposit" ? "#dbb96e" : edge;
     ctx.stroke();
@@ -134,8 +136,17 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
       if (cache) drawCache(x, y);
       if (action) {
         const dy = kind || cache ? 12 : 0;
-        circle(x, y + dy, 5.2, "#183231");
-        circle(x, y + dy, 2.8, "#b3eee0");
+        if (hop) {
+          ctx.save();
+          ctx.translate(x, y + dy);
+          ctx.rotate(Math.PI / 4);
+          ctx.fillStyle = "#e4b5f5";
+          ctx.fillRect(-3.2, -3.2, 6.4, 6.4);
+          ctx.restore();
+        } else {
+          circle(x, y + dy, 5.2, "#183231");
+          circle(x, y + dy, 2.8, "#b3eee0");
+        }
       }
     }
   }
@@ -176,7 +187,9 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
   }
 
   function drawProxy(proxy, x, y, ready, action) {
+    const proxyDesign = playerSkins[proxy.side] ?? DEFAULT_PROXY_SKIN;
     const classic = proxyDesign === "classic";
+    const drone = proxyDesign === "drone";
     const color = team[proxy.side];
     ctx.save();
     ctx.translate(x, y);
@@ -184,10 +197,10 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
     if (!ready) ctx.setLineDash([3, 2]);
     ctx.beginPath();
     if (classic) traceClassicProxy();
-    else {
+    else if (drone) {
       ctx.moveTo(...DRONE[0]);
       for (let i = 1; i < DRONE.length; i += 1) ctx.lineTo(...DRONE[i]);
-    }
+    } else ctx.arc(0, 0, 9.9, 0, 2 * Math.PI);
     ctx.closePath();
     ctx.fillStyle = ready ? color.body : "#26313b";
     ctx.strokeStyle = action ? "#ffdea0" : color.light;
@@ -203,7 +216,7 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
       ctx.strokeStyle = color.light;
       ctx.lineWidth = 1.55;
       ctx.stroke();
-    } else {
+    } else if (drone) {
       ctx.fillStyle = color.light;
       ctx.fillRect(-3.5, -2.9, 7, 2);
       if (ready) ctx.fillRect(-1, 2.8, 2, 2);
@@ -228,16 +241,23 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
     ctx.beginPath();
     ctx.moveTo(x - dx, y - dy);
     ctx.lineTo(x + dx, y + dy);
-    drawShield(source === inspected ? "#fff1bd" : team[side].wall, active);
+    drawShield(team[side].wall, active, source === inspected);
   }
 
-  function drawShield(color, active) {
+  function drawShield(color, active, linked = false) {
+    const weight = active ? 3 : 2.15;
     ctx.save();
     ctx.lineCap = active ? "round" : "butt";
+    if (!active) ctx.setLineDash([4.2, 2.9]);
+    if (linked) {
+      ctx.lineWidth = weight + 2;
+      ctx.strokeStyle = "#e2eaff";
+      ctx.globalAlpha = .6;
+      ctx.stroke();
+    }
     ctx.strokeStyle = color;
-    ctx.globalAlpha = active ? 1 : .31;
-    ctx.lineWidth = active ? 3 : 1.5;
-    if (!active) ctx.setLineDash([3, 3]);
+    ctx.globalAlpha = active || linked ? 1 : .64;
+    ctx.lineWidth = weight;
     ctx.stroke();
     ctx.restore();
   }
@@ -358,7 +378,9 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
     if (game?.caches?.includes(cursor)) label += ", salvage cache";
     if (proxy) label += `, ${sideName(proxy.side)} ${proxy.fortified ? "fortified Proxy" : "Proxy"}`;
     if (action) {
-      label += `, ${action.type === "move" && proxy ? "capture Proxy" : action.type}, ${action.cost} TV`;
+      const labelType = action.type === "move" && proxy ? "capture Proxy"
+        : action.type === "hop-target" ? "Hop landing" : action.type;
+      label += `, ${labelType}, ${action.cost} TV`;
       if (action.refund) label += ", refunded by Ascension";
     }
     else if (range.has(cursor)) label += ", in Obelisk range";
@@ -414,11 +436,9 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
   new ResizeObserver(resize).observe(viewport);
   resize();
   return {
-    setProxyDesign(design) {
-      proxyDesign = design;
-      draw();
-    },
-    render(state, { selected = null, inspect = null, actions = [], planned = [], mode = "move", firingRange = [] } = {}) {
+    render(state, {
+      selected = null, inspect = null, actions = [], planned = [], mode = "move", firingRange = [], playerSkins: skins = {},
+    } = {}) {
       showNewImpacts(state);
       game = state;
       selection = selected;
@@ -427,6 +447,7 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
       range = new Set(firingRange);
       plan = planned;
       order = mode;
+      playerSkins = skins;
       describeCursor();
       draw();
     },

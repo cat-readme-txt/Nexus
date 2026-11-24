@@ -190,8 +190,10 @@ input {
 .swatch.cradle { color: #81ac84; background: #294a43; }
 .swatch.turbulence { color: #8d9baa; background: #344053; }
 .swatch.shield { width: 1rem; height: .25rem; border: none; background: #a88cff; }
-.swatch.shield.idle { height: 0; border-top: 2px dashed #78669e; background: none; }
+.swatch.shield.idle { height: 0; border-top: 2px dashed #a28acb; background: none; }
+.swatch.shield.linked { box-shadow: 0 0 0 1px #e2eaff; }
 .swatch.range { border-color: #79c9d7; background: #243c48; }
+.swatch.hop { width: .6rem; height: .6rem; border: 0; border-radius: 1px; background: #e4b5f5; transform: rotate(45deg); }
 .swatch.cache { width: .79rem; height: .63rem; border-radius: 0; color: #a1efdf; }
 
 .side-panel { display: grid; gap: .65rem; min-width: 0; }
@@ -310,6 +312,7 @@ dialog { width: min(42rem, 100% - 1.25rem); max-height: 88svh; color: var(--text
   border-radius: 8px;
   padding: .37rem .5rem;
 }
+.settings-hint { margin-top: .35rem; font-size: .9rem; }
 .test-setting { border-top: 1px solid var(--line); padding-top: .85rem; }
 .test-setting label { display: flex; align-items: center; gap: .55rem; }
 .test-setting input { width: 1rem; height: 1rem; }
@@ -356,12 +359,13 @@ dialog { width: min(42rem, 100% - 1.25rem); max-height: 88svh; color: var(--text
 .augment-list { display: grid; gap: .3rem; list-style: none; padding: 0; margin: 0; }
 .augment-list li {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: .8rem;
+  grid-template-columns: 1.75rem minmax(0, 1fr) auto;
+  gap: .65rem;
   align-items: center;
   padding: .65rem .2rem;
   border-top: 1px solid var(--line);
 }
+.augment-icon { width: 1.75rem; height: 1.75rem; align-self: start; margin-top: .1rem; }
 .augment-list h3 { font-size: .98rem; margin-bottom: .18rem; color: #f1d694; }
 .augment-list p { color: var(--muted); font-size: .89rem; }
 .augment-list button { min-width: 6.5rem; font-size: .9rem; }
@@ -434,8 +438,8 @@ body:has(#augments-dialog[open]) #notice { visibility: hidden; }
 
 @media (max-width: 360px) {
   .launch-buttons { grid-template-columns: 1fr; }
-  .augment-list li { grid-template-columns: 1fr; gap: .36rem; }
-  .augment-list button { justify-self: start; }
+  .augment-list li { grid-template-columns: 1.75rem minmax(0, 1fr); gap: .36rem .65rem; }
+  .augment-list button { grid-column: 2; justify-self: start; }
 }
 
 @media (prefers-reduced-motion: reduce) {
