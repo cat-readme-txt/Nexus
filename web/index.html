@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b1019">
+  <meta name="description" content="A two-player hex strategy game. Command Proxies, break through shields, and capture the Nexus.">
+  <title>Nexus</title>
+  <link rel="icon" type="image/png" sizes="48x48" href="./assets/favicon.png">
+  <link rel="apple-touch-icon" href="./assets/game-icon.png">
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <header class="masthead">
+    <div class="brand"><img src="./assets/game-icon.png" alt="" width="32" height="32"><span>Nexus</span></div>
+    <nav aria-label="Game controls">
+      <button class="quiet" id="rules-button" type="button">How to play</button>
+      <button class="quiet" id="review-button" type="button" hidden>Match review</button>
+      <button class="quiet" id="menu-button" type="button" hidden>Leave match</button>
+    </nav>
+  </header>
+
+  <main id="home" class="home">
+    <section class="home-hero" aria-labelledby="home-title">
+      <img class="home-art" src="./assets/nexus-frontier.webp" alt="" fetchpriority="high">
+      <div class="home-content">
+        <div class="hero-copy">
+          <p class="hero-label">Two-player hex strategy</p>
+          <h1 id="home-title">Nexus</h1>
+          <p class="hero-description">Earth’s AI simulates the wars ahead. Command a Proxy force and capture the opposing Nexus.</p>
+        </div>
+        <div class="home-controls">
+          <section class="play-panel" id="play-panel" aria-label="Play Nexus">
+            <div class="launch-buttons">
+              <button class="play-choice primary" id="play-local" type="button">
+                <strong>Pass and play</strong><span>Two players on one device</span>
+              </button>
+              <button class="play-choice" id="find-match" type="button">
+                <strong>Find an opponent</strong><span>Join the online queue</span>
+              </button>
+            </div>
+            <div class="online-options">
+              <details id="friend-controls">
+                <summary>Play with a friend</summary>
+                <button id="create-room" type="button">Create room</button>
+                <form id="join-room">
+                  <label for="room-input">Room code</label>
+                  <div class="room-entry">
+                    <input id="room-input" type="text" maxlength="8" pattern="[0-9A-Fa-f]{8}" autocomplete="off" spellcheck="false" required>
+                    <button type="submit">Join</button>
+                  </div>
+                </form>
+              </details>
+              <p id="online-unavailable" class="muted" hidden>Online play requires a matchmaking server.</p>
+            </div>
+          </section>
+
+          <section class="panel waiting-panel" id="waiting-panel" hidden>
+            <h2 id="waiting-title">Finding an opponent</h2>
+            <p id="waiting-description"></p>
+            <div class="invite-code" id="invite-code-panel" hidden>
+              <strong id="invite-code"></strong>
+              <button id="copy-code" type="button">Copy</button>
+            </div>
+            <button class="quiet" id="cancel-search" type="button">Cancel</button>
+          </section>
+
+          <p id="home-notice" role="status" class="notice" hidden></p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <main id="species" class="match-screen" hidden>
+    <div class="match-screen-header">
+      <h1 id="species-heading" tabindex="-1">Choose your species</h1>
+      <p id="species-message" aria-live="polite"></p>
+    </div>
+    <button type="button" id="start-selection" class="primary" hidden>Ready to choose</button>
+    <div id="species-options" class="species-grid" hidden></div>
+    <p id="species-notice" role="status" class="notice" hidden></p>
+  </main>
+
+  <main id="review" class="match-screen" hidden>
+    <div class="match-screen-header review-heading">
+      <div>
+        <h1 id="result-title" tabindex="-1"></h1>
+        <p id="result-message"></p>
+      </div>
+      <div class="review-actions">
+        <button type="button" id="result-menu" class="primary">Back to menu</button>
+        <button type="button" id="result-board">View final board</button>
+      </div>
+    </div>
+    <div id="species-reveal" class="species-grid revealed"></div>
+    <div class="review-table" id="review-stats"></div>
+    <p id="review-notice" role="status" class="notice" hidden></p>
+  </main>
+
+  <main class="layout" id="battle" hidden>
+    <section class="board-panel" aria-labelledby="board-heading">
+      <div class="board-toolbar">
+        <div>
+          <h2 id="board-heading">Battlefield</h2>
+          <p id="board-status">Capture the opposing Nexus</p>
+        </div>
+        <div class="zoom" aria-label="Board zoom">
+          <button type="button" id="zoom-out" aria-label="Zoom out">−</button>
+          <button type="button" id="zoom-fit">Fit</button>
+          <button type="button" id="zoom-in" aria-label="Zoom in">+</button>
+        </div>
+      </div>
+      <div class="board-stage">
+        <div class="board-viewport" id="board-viewport">
+          <canvas id="board" tabindex="0" aria-label="Battlefield. Use Q, W, E, A, S, and D to navigate, and Enter to select."></canvas>
+        </div>
+        <section class="board-overlay" id="handoff" aria-labelledby="handoff-title" hidden>
+          <div class="overlay-card">
+            <h2 id="handoff-title"></h2>
+            <p id="handoff-message"></p>
+            <button class="primary" id="start-turn" type="button">Start turn</button>
+          </div>
+        </section>
+      </div>
+      <div class="board-key" aria-label="Map key">
+        <span><i class="swatch blue"></i>Blue territory</span>
+        <span><i class="swatch red"></i>Red territory</span>
+        <span><i class="swatch cradle"></i>Cradle</span>
+        <span><i class="swatch turbulence"></i>Turbulence</span>
+        <span><i class="swatch shield"></i>Shield up</span>
+        <span><i class="swatch shield idle"></i>Shield down</span>
+        <span id="range-key" hidden><i class="swatch range"></i>Obelisk range</span>
+        <span><i class="swatch cache"></i>Salvage cache</span>
+      </div>
+    </section>
+
+    <aside class="side-panel" aria-label="Match controls">
+      <section id="match-panel" hidden>
+        <div class="panel turn-panel" id="turn-panel">
+          <div class="turn-heading">
+            <div>
+              <h2 id="turn-heading"></h2>
+              <p id="seat-label" class="muted"></p>
+            </div>
+            <div id="timer" aria-label="Time remaining"></div>
+          </div>
+          <div class="timer-track" aria-hidden="true"><div id="timer-bar"></div></div>
+        </div>
+
+        <div class="team-grid" aria-label="Resources">
+          <section class="panel team-card" data-side="blue" id="blue-team">
+            <h3>Blue</h3>
+            <strong id="blue-energy"></strong>
+            <p id="blue-proxies" class="muted"></p>
+            <p id="blue-effects" class="team-effects" hidden></p>
+          </section>
+          <section class="panel team-card" data-side="red" id="red-team">
+            <h3>Red</h3>
+            <strong id="red-energy"></strong>
+            <p id="red-proxies" class="muted"></p>
+            <p id="red-effects" class="team-effects" hidden></p>
+          </section>
+        </div>
+
+        <section class="panel orders-panel" aria-labelledby="orders-title">
+          <h2 id="orders-title">Orders</h2>
+          <p id="orders-description"></p>
+          <div class="command-group" id="reinforcements">
+            <h3>Reinforcements</h3>
+            <div class="orders-buttons">
+              <button type="button" id="deploy" aria-pressed="false">Deploy in Cradle <span id="deploy-cost"></span></button>
+              <button type="button" id="fabricate" aria-describedby="fabrication-hint">Fabricate reserve <span>2 TV</span></button>
+              <button type="button" id="forward" aria-pressed="false" hidden>Forward deploy <span id="forward-cost"></span></button>
+              <button type="button" id="salvage" hidden>Recover cache <span>2 TV</span></button>
+            </div>
+            <p class="command-hint" id="fabrication-hint" hidden></p>
+          </div>
+          <div class="orders-buttons" id="tile-orders">
+            <button type="button" id="strike" class="primary" hidden>Strike <span id="strike-cost"></span></button>
+            <button type="button" id="withdraw" hidden>Withdraw <span>0 TV</span></button>
+            <button type="button" id="ascension-strike" aria-pressed="false" hidden>Ascension strike <span id="ascension-strike-cost"></span></button>
+            <button type="button" id="occupy" hidden>Occupy <span id="occupy-cost"></span></button>
+            <button type="button" id="fire" aria-pressed="false" hidden>Obelisk fire <span>1 TV</span></button>
+            <button type="button" id="fortify" hidden>Fortify <span>2 TV</span></button>
+            <button type="button" id="phase-jump" aria-pressed="false" hidden>Phase jump <span>2 TV</span></button>
+          </div>
+          <div class="target-actions orders-buttons" id="target-actions" hidden>
+            <button type="button" id="confirm-targets" class="primary"></button>
+            <button type="button" id="cancel-targets" class="quiet">Cancel</button>
+          </div>
+          <div class="orders-buttons turn-actions" id="turn-actions">
+            <button type="button" id="augments-button">Augments <span id="augment-count"></span></button>
+            <button type="button" id="end-turn" class="primary">End turn</button>
+          </div>
+        </section>
+
+        <section class="panel hex-inspector" id="hex-inspector" aria-labelledby="hex-title" hidden></section>
+        <details class="panel" id="live-stats">
+          <summary>Match statistics</summary>
+          <div class="review-table live-stats-table" id="live-stats-table"></div>
+        </details>
+        <details class="panel log-panel" open>
+          <summary>Activity</summary>
+          <ol id="activity"></ol>
+        </details>
+      </section>
+      <p id="notice" role="status" class="notice" hidden></p>
+    </aside>
+  </main>
+
+  <dialog id="rules-dialog" aria-labelledby="rules-title">
+    <div class="dialog-heading"><h2 id="rules-title">How to play</h2><form method="dialog"><button class="quiet" value="close">Close</button></form></div>
+    <div class="rules-content">
+      <p>Capture the enemy Nexus. Choose a species privately. Blue goes first. Each side places three Proxies in its green Cradle Sector.</p>
+      <details class="rules-background">
+        <summary>Background</summary>
+        <p>Humanity depends on AI when it discovers hostile powers beyond Earth. With little intelligence and no agreement on how to respond, the world's governments turn their supercomputers over to their most advanced AI. It simulates possible wars, including conflicts between the alien powers. Each match is one of those simulations.</p>
+      </details>
+      <p><strong>TV stands for teravolts.</strong> TV is the game's energy budget for orders. Base recharge is 3 TV plus 1 TV per active Proxy, up to 30 TV. Spend TV before the three-minute turn ends. Unused TV is lost.</p>
+      <dl class="rule-actions">
+        <div><dt>Move · 1 TV</dt><dd>Enter an adjacent hex. Enemy shield borders block movement.</dd></div>
+        <div><dt>Strike · base cost 2 TV</dt><dd>Move onto an enemy hex with enough TV left to fight, then choose Strike to attack the enemy sharing that hex. You can withdraw for free. Ending the turn or running out of time sends your Proxy back to its starting hex.</dd></div>
+        <div><dt>Deploy · base cost 1 TV</dt><dd>Place a reserve Proxy on a free hex in your Cradle. It can act, power nodes, and generate TV starting on your next turn.</dd></div>
+      </dl>
+      <dl class="rule-nodes">
+        <div><img src="./assets/nexus.png" alt=""><div><dt>Nexus</dt><dd>Enter the enemy Nexus to win.</dd></div></div>
+        <div><img src="./assets/vanguard.png" alt=""><div><dt>Vanguard</dt><dd>A friendly Proxy powers the Nexus shield from here. It falls if the enemy controls all eight of your Obelisks.</dd></div></div>
+        <div><img src="./assets/sentinel.png" alt=""><div><dt>Sentinel Obelisk</dt><dd>Occupy for 3 TV to shut down enemy shields or restore your own. Fire from your own staffed Obelisk for 1 TV to hit an enemy up to two steps away.</dd></div></div>
+        <div><img src="./assets/aegis.png" alt=""><div><dt>Aegis</dt><dd>Enter with an active Proxy to claim it and disable its enemy shield. Friendly control restores the shield.</dd></div></div>
+        <div><img src="./assets/deposit.png" alt=""><div><dt>Deposit</dt><dd>Occupy for 3 TV to add one Proxy to your reserve.</dd></div></div>
+      </dl>
+      <p>Fabricate a reserve Proxy for 2 TV with fewer than two active Proxies, once every three turns. Salvage caches surface in Turbulence every third round. An active Proxy can recover one for 2 TV.</p>
+      <p>A staffed Aegis can deploy a reserve Proxy to an open neighboring hex for 1 TV. Its shields drop until your next turn. Keep a Proxy on a newly claimed node until your next turn to secure control.</p>
+      <p>Species abilities are explained when you choose. Board effects are visible, and the match review reveals both picks.</p>
+      <p>Hold a Deposit with an active Proxy to buy augments. Use a purchased augment on one of your turns, even if you later lose the Deposit.</p>
+      <p class="muted">Use Q, W, E, A, S, and D to move around the board with a keyboard. Enter selects a hex.</p>
+    </div>
+  </dialog>
+
+  <dialog id="augments-dialog" aria-labelledby="augments-title">
+    <div class="dialog-heading">
+      <h2 id="augments-title">Augments</h2>
+      <p id="augment-timer" class="augment-timer" aria-label="Time remaining"></p>
+      <form method="dialog"><button class="quiet" value="close">Close</button></form>
+    </div>
+    <p id="augment-status" class="augment-status"></p>
+    <p id="augment-notice" class="notice" role="status" hidden></p>
+    <ul id="augment-list" class="augment-list"></ul>
+  </dialog>
+
+  <dialog id="leave-dialog" aria-labelledby="leave-title">
+    <div class="dialog-heading"><h2 id="leave-title">Concede match?</h2></div>
+    <p id="leave-description"></p>
+    <form method="dialog" class="dialog-actions">
+      <button value="stay" autofocus>Keep playing</button>
+      <button value="leave" class="primary">Concede</button>
+    </form>
+  </dialog>
+</body>
+</html>
