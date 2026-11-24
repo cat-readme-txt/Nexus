@@ -1,6 +1,6 @@
 # Nexus
 
-Nexus is the working title for a two-player hex strategy game adapted from the competition board. Command Proxies, capture nodes, and enter the opposing Nexus to win.
+Nexus is a two-player hex strategy game adapted from the competition board. Command Proxies, capture nodes, and enter the opposing Nexus to win. [Play Nexus](https://cat-readme-txt.github.io/Nexus/)
 
 ## Background
 
@@ -75,17 +75,18 @@ The [competition manual](competition/instruction-manual.pdf) and [print board](c
 
 ## Publish to GitHub Pages
 
-The game has a static frontend and a separate matchmaking service. The workflow uploads only the browser files in `dist/`. [GitHub Pages custom workflows](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)
+In **Settings → Pages**, set the publishing source to **GitHub Actions**. Push to `main` or run **Publish game to GitHub Pages** in the Actions tab. The workflow tests the game, builds the browser files into `dist/`, and publishes that directory. [GitHub Pages custom workflows](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)
 
-1. To enable online play, deploy the matchmaking service with the supplied Cloudflare Worker configuration. The Worker and browser share the rules engine, so redeploy the Worker when publishing a change to the rules. [Cloudflare Durable Objects setup](https://developers.cloudflare.com/durable-objects/get-started/)
+The Pages build supports pass-and-play by default. To enable online play:
+
+1. Deploy the matchmaking service with the supplied Cloudflare Worker configuration. The Worker and browser share the rules engine, so redeploy the Worker when publishing a change to the rules. [Cloudflare Durable Objects setup](https://developers.cloudflare.com/durable-objects/get-started/)
 
    ```sh
    npx wrangler@4 login
    npx wrangler@4 deploy
    ```
 
-2. In the GitHub repository's Actions variables, set `MATCHMAKING_URL` to the public HTTPS origin printed by Wrangler. The Pages build uses that origin for the game API. With the variable empty, the site offers pass-and-play.
-3. Choose **GitHub Actions** as the repository's Pages publishing source. Push to `main` or run **Publish game to GitHub Pages** in the Actions tab.
+2. In the GitHub repository's Actions variables, set `MATCHMAKING_URL` to the public HTTPS origin printed by Wrangler, then rerun the Pages workflow.
 
 Run `npm test` to check the rules and matchmaking, and `npm run build` to regenerate the Pages artifact.
 
