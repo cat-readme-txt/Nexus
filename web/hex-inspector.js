@@ -12,13 +12,13 @@ export const NODE_ICONS = {
 
 const descriptions = {
   nexus: "Enter the enemy Nexus to win. Each powered Vanguard protects three approaches. Full protection requires both halves.",
-  vanguard: "Pay 2 TV to arm this half of the Nexus shield. It needs an active friendly Proxy here and an online home Aegis or Obelisk clear of enemies.",
-  sentinel: "Activate its linked field shield for 2 TV. Base capture cost is 3 TV. Home Obelisk fire costs 1 TV before modifiers and reaches up to two hexes.",
+  vanguard: "Pay 2 TV to fire up to three reachable hexes away with an active Proxy. Arming this Nexus shield half costs 2 TV and needs home shield support to come online.",
+  sentinel: "Capture for 3 TV (4 for Veyari) and activate its shield for 2 TV. An active Proxy on a controlled Obelisk can fire up to two reachable steps away for 1 TV (2 for Directorate).",
   aegis: "Capture for free and activate its shield for 2 TV. With the Forward Deployment augment, a staffed and powered Aegis can deploy reserve Proxies to legal neighbors.",
   deposit: "Claim it to gain one reserve Proxy. Keep an active Proxy on a Deposit you control to buy augments.",
   cradle: "Place starting Proxies here or deploy from reserve. Deployed Proxies activate on your next turn.",
   turbulence: "Veyari can phase jump from this terrain. Ascension bonuses are inactive here, and salvage caches can appear.",
-  cache: "Spend 2 TV with an active Proxy on this hex to add one Proxy to reserve. Recovering it removes the cache.",
+  cache: "Enter this hex with a Proxy to collect one reserve Proxy at no extra TV.",
   territory: "Territory marks which side can use Defensive Strike against enemies here.",
 };
 
@@ -33,8 +33,8 @@ export function renderHexInspector(panel, game, id, region) {
   panel.hidden = !tile;
   if (!tile) return;
   const cache = game.caches?.includes(id);
-  const kind = tile.node?.type ?? (cache ? "cache" : tile.cradle ? "cradle" : tile.region === "turbulence" ? "turbulence" : "territory");
-  const heading = element("h2", `${cache ? "Salvage cache" : tileName(tile)} · ${tileLabel(id)}`);
+  const kind = tile.node?.type ?? (cache ? "cache" : tile.cradle ? "cradle" : region ? "territory" : "turbulence");
+  const heading = element("h2", `${kind === "cache" ? "Salvage cache" : tileName(tile, region)} · ${tileLabel(id)}`);
   heading.id = "hex-title";
   const header = element("div");
   header.className = "hex-inspector-heading";
@@ -55,11 +55,13 @@ export function renderHexInspector(panel, game, id, region) {
     details.append(row);
   }
 
-  add("Region", region ? sideName(region) : "Neutral");
+  add("Region", tile.cradle ? `${sideName(tile.cradle)} Cradle` : region ? sideName(region) : "Turbulence");
+  if (cache && kind !== "cache") add("Salvage cache", "Enter to get one reserve Proxy at no extra TV.");
   if (tile.node) {
     const controller = nodeController(game, id);
     const pending = kind === "deposit" && game.claims[id]?.pending;
-    add("Control", controller ? `${sideName(controller)}${pending ? " · claim pending" : ""}` : "Unclaimed");
+    const captured = controller && tile.node.home && controller !== tile.node.home;
+    add("Control", controller ? `${sideName(controller)}${pending ? " · claim pending" : captured ? " · captured" : ""}` : "Unclaimed");
     const links = specialHexLinks.get(id);
     if (links.length) add("Territory links", links.map(tileLabel).join(" · "));
     const fieldGenerator = kind === "aegis" || kind === "sentinel";
@@ -83,7 +85,7 @@ export function renderHexInspector(panel, game, id, region) {
   if (proxy) {
     const status = proxyReady(game, proxy) ? "Active" : "Activates on its owner’s next turn";
     add(`${sideName(proxy.side)} Proxy`, proxy.fortified ? `${status} · fortified` : status);
-    if (proxy.fortified) add("Armor", "Absorbs one Obelisk or Defensive Strike hit");
+    if (proxy.fortified) add("Armor", "Absorbs one ranged hit");
   } else {
     add("Proxies", "Empty");
   }

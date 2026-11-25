@@ -51,6 +51,7 @@ const metrics = [
   ["Move captures", "moveCaptures"],
   ["Hop captures", "hopCaptures"],
   ["Obelisk shots", "obeliskShots"],
+  ["Vanguard shots", "vanguardShots"],
   ["Defensive Strike uses", "defensiveStrikes"],
   ["Reinforcements deployed", "deployed"],
   ["Forward deployments", "forwardDeployed"],

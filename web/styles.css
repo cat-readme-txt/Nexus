@@ -188,6 +188,7 @@ input {
 .swatch.blue { color: #6e8ee0; background: #263a68; }
 .swatch.red { color: #da7e81; background: #58303c; }
 .swatch.cradle { color: #81ac84; background: #294a43; }
+.swatch.captured { width: .6rem; height: .6rem; border: 2px solid #b5d2ff; border-radius: 50%; background: #294f99; }
 .swatch.turbulence { color: #8d9baa; background: #344053; }
 .swatch.shield { width: 1rem; height: .25rem; border: none; background: #a88cff; }
 .swatch.shield.idle { height: 0; border-top: 2px dashed #a28acb; background: none; }
@@ -252,8 +253,8 @@ details form label { display: block; font-size: .88rem; margin-bottom: .28rem; }
 .command-group h3 { font-size: .8rem; font-weight: 700; margin: 0 0 .45rem; color: var(--muted); }
 .orders-buttons { display: grid; gap: .4rem; }
 .orders-buttons button { display: flex; width: 100%; justify-content: space-between; font-weight: 600; font-size: .9rem; }
-.orders-buttons button span { opacity: .77; font-variant-numeric: tabular-nums; }
-.orders-buttons button span { white-space: nowrap; }
+.orders-buttons button span:last-child { opacity: .77; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#occupy-label { font-weight: 400; }
 .orders-buttons:not(:empty) + .orders-buttons { margin-top: .45rem; }
 .order-control { position: relative; min-width: 0; }
 .order-control:has(> button[hidden]) { display: none; }
@@ -275,7 +276,7 @@ details form label { display: block; font-size: .88rem; margin-bottom: .28rem; }
   visibility: hidden;
   pointer-events: none;
 }
-.order-control:is(:hover, :focus, :has(> button:focus-visible)) > .order-tooltip { visibility: visible; }
+.order-control:not([data-help-dismissed]):is(:hover, :focus, :has(> button:focus-visible)) > .order-tooltip { visibility: visible; }
 #tile-orders:has(button:not([hidden])) { margin-top: .6rem; }
 .target-actions { display: flex; gap: .42rem; margin-top: .45rem; }
 .target-actions .order-control:first-child { flex: 1; }

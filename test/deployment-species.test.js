@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cradles, nodes, tiles, walls } from "../web/board.js";
+import { board, cradles, nodes, tiles, walls } from "../web/board.js";
 import {
   applyAction, createGame, fabricationError, forwardActions, nodeController, nodeOrders, placementActions,
   proxyActions, readyProxy, wallActive,
 } from "../web/rules.js";
+import { territoryMap } from "../web/territory.js";
 
 const now = 10;
 
@@ -54,22 +55,56 @@ test("a wiped-out side can fabricate for 2 TV and deploy using its last TV", () 
   assert.match(fabricationError(game, "blue"), /fewer than two/);
 });
 
-test("a Turbulence cache surfaces on round three and a ready Proxy can recover it once", () => {
+test("round three adds a pair of caches on opposite sides of the current Turbulence", () => {
   const game = playing();
-  assert.deepEqual(game.caches, []);
+  game.activatedShields[94] = "blue";
+  game.caches = [60];
+  place(game, 162);
   nextBlueTurn(game);
-  assert.equal(game.caches.length, 1);
-  const [from] = game.caches;
-  assert.equal(tiles.get(from).region, "turbulence");
-  place(game, from, "blue", game.players.blue.turns + 1);
-  assert.match(act(game, { type: "salvage", from, to: from }), /unavailable/);
-  game.proxies[from].readyOn = 0;
-  assert.equal(act(game, { type: "salvage", from, to: from }), null);
+  const [existing, west, east] = game.caches;
+  assert.equal(game.caches.length, 3);
+  assert.equal(existing, 60);
+  assert.equal(new Set(game.caches).size, 3);
+  assert(tiles.get(west).column <= 12 && tiles.get(east).column > 12);
+  const regions = territoryMap(game);
+  for (const id of [west, east]) {
+    assert(!regions.has(id));
+    assert(!game.proxies[id]);
+  }
+  nextBlueTurn(game);
+  assert.equal(game.caches.length, 3);
+});
+
+test("cache spawns skip a round when either half has no eligible hex", () => {
+  const game = playing();
+  const regions = territoryMap(game);
+  for (const { id, column } of board) if (column > 12 && !regions.has(id)) place(game, id, "red");
+  nextBlueTurn(game);
+  assert.deepEqual(game.caches, []);
+});
+
+test("moving onto a cache adds one reserve without an extra TV charge", () => {
+  const game = playing();
+  game.caches = [60];
+  place(game, 35);
+  assert.equal(act(game, { type: "move", from: 35, to: 60 }), null);
   assert.equal(game.players.blue.reserve, 1);
-  assert.equal(game.players.blue.tv, 1);
+  assert.equal(game.players.blue.tv, 11);
   assert.equal(game.stats.blue.salvaged, 1);
   assert.deepEqual(game.caches, []);
-  assert.match(act(game, { type: "salvage", from, to: from }), /unavailable/);
+  assert.equal(act(game, { type: "move", from: 60, to: 35 }), null);
+  assert.equal(act(game, { type: "move", from: 35, to: 60 }), null);
+  assert.equal(game.players.blue.reserve, 1);
+});
+
+test("Troop Disabler leaves a cache in place when a Proxy steps onto it", () => {
+  const game = playing();
+  game.players.red.augments = { inventory: {}, disablerTurn: game.players.blue.turns };
+  game.caches = [60];
+  place(game, 35);
+  assert.equal(act(game, { type: "move", from: 35, to: 60 }), null);
+  assert.equal(game.players.blue.reserve, 0);
+  assert.deepEqual(game.caches, [60]);
 });
 
 test("forward deployment needs the augment and a powered Aegis, and can repeat in one turn", () => {
@@ -133,10 +168,9 @@ test("a captured Aegis can be powered for forward deployment, while Obelisks can
 test("special node orders retain prices and explain why a selected Proxy cannot act", () => {
   const game = playing("veyari");
   game.players.blue.tv = 1;
-  game.caches = [161];
   place(game, 161);
   place(game, 162);
-  const expected = [[161, "salvage", 2], [161, "phase-jump", 2], [162, "occupy", 4]];
+  const expected = [[161, "phase-jump", 2], [162, "occupy", 4]];
   for (const [from, type, cost] of expected) {
     const order = nodeOrders(game, from).find((order) => order.type === type);
     assert.equal(order.cost, cost);

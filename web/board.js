@@ -107,8 +107,8 @@ export function tileLabel(id) {
   return `${String.fromCharCode(65 + column)}${row + 1}`;
 }
 
-export function tileName(tile) {
+export function tileName(tile, region = "turbulence") {
   return tile.node ? NODE_NAMES[tile.node.type]
     : tile.cradle ? `${sideName(tile.cradle)} Cradle`
-      : tile.region === "turbulence" ? "Turbulence" : `${sideName(tile.region)} territory`;
+      : region === "turbulence" ? "Turbulence" : `${sideName(region)} territory`;
 }

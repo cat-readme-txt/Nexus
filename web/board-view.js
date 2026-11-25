@@ -25,7 +25,6 @@ const terrain = {
   red: ["#472b37", "#976272"],
   turbulence: ["#303946", "#657585"],
   cradle: ["#244638", "#78a393"],
-  deposit: ["#433924", "#baa164"],
 };
 const team = {
   blue: { wall: "#b394ff", body: "#294f99", light: "#b5d2ff" },
@@ -112,8 +111,7 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
     const isHovered = tile.id === hovered;
     const planned = plan.includes(tile.id);
     const inRange = range.has(tile.id);
-    const region = regions.get(tile.id) ?? tile.region;
-    const [fill, edge] = terrain[tile.cradle === region ? "cradle" : region];
+    const [fill, edge] = terrain[tile.cradle ? "cradle" : regions.get(tile.id) ?? "turbulence"];
     const kind = tile.node?.type;
     const controller = game && tile.node ? nodeController(game, tile.id) : null;
     const captured = controller && controller !== tile.node.home;
@@ -137,7 +135,7 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
         const { size } = NODE_ICONS[kind];
         ctx.drawImage(assets[kind], x - size / 2, y - size / 2, size, size);
       }
-      if (cache) drawCache(x, y);
+      if (cache && !kind) drawCache(x, y);
       if (action) {
         const dy = kind || cache ? 12 : 0;
         if (hop) {
@@ -152,6 +150,11 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
           circle(x, y + dy, 2.8, "#b3eee0");
         }
       }
+    }
+    if (kind && cache) drawCache(x - 12, y + 10, .7);
+    if (captured) {
+      circle(x + 12, y - 10, 5, team[controller].light);
+      circle(x + 12, y - 10, 3, team[controller].body);
     }
   }
 
@@ -174,11 +177,11 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
     ctx.restore();
   }
 
-  function drawCache(x, y) {
+  function drawCache(x, y, scale = 1) {
     ctx.lineWidth = 1.8;
     ctx.strokeStyle = "#a1efdf";
-    ctx.strokeRect(x - 6, y - 5, 12, 10);
-    ctx.strokeRect(x - 2, y - 5, 4, 10);
+    ctx.strokeRect(x - 6 * scale, y - 5 * scale, 12 * scale, 10 * scale);
+    ctx.strokeRect(x - 2 * scale, y - 5 * scale, 4 * scale, 10 * scale);
   }
 
   function traceClassicProxy() {
@@ -392,9 +395,9 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
     const tile = tiles.get(cursor);
     const proxy = game?.proxies[cursor];
     const action = targets.get(cursor);
-    let label = `${tileLabel(cursor)}, ${tileName(tile)}`;
     const region = regions.get(cursor);
-    if (region && region !== tile.region) label += `, ${sideName(region)} region`;
+    let label = `${tileLabel(cursor)}, ${tileName(tile, region)}`;
+    if ((tile.node || tile.cradle) && region) label += `, ${sideName(region)} region`;
     if (game?.caches?.includes(cursor)) label += ", salvage cache";
     if (proxy) label += `, ${sideName(proxy.side)} ${proxy.fortified ? "fortified Proxy" : "Proxy"}`;
     if (action) {
@@ -403,7 +406,7 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
       label += `, ${labelType}, ${action.cost} TV`;
       if (action.refund) label += ", refunded by Ascension";
     }
-    else if (range.has(cursor)) label += ", in Obelisk range";
+    else if (range.has(cursor)) label += ", in firing range";
     canvas.setAttribute("aria-label", label);
   }
 
@@ -420,7 +423,7 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
     const id = pick(event);
     if (id !== hovered) {
       hovered = id;
-      previewAction(id, targets.get(id), range.has(id));
+      previewAction(id, targets.get(id), range.has(id), regions.get(id));
       draw();
     }
   });

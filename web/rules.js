@@ -1,8 +1,8 @@
 import { AUGMENT_BY_ID } from "./augments.js";
 import { speciesById, speciesOf } from "./species.js";
-import { nodeController, territoryMap } from "./territory.js";
+import { nodeController, shieldActivation, territoryMap } from "./territory.js";
 import {
-  cradles, edgeKey, mirroredWallsBySource, nexus, nexusWalls, nexusWallsByEdge, nodes, otherSide,
+  board, cradles, edgeKey, mirroredWallsBySource, nexus, nexusWalls, nexusWallsByEdge, nodes, otherSide,
   sideName, SIDES, tileLabel, tileName, tiles, wallsByEdge, wallsBySource,
 } from "./board.js";
 
@@ -13,21 +13,23 @@ export const MAX_TV = 40;
 export const VOID_TV_CAP = 20;
 export const STARTING_PROXIES = 3;
 export const ACTION_COST = {
-  move: 1, spawn: 1, occupy: 3, fire: 1, fabricate: 2, salvage: 2, phase: 2, fortify: 2,
-  shield: 2,
+  move: 1, spawn: 1, occupy: 3, fire: 1, vanguardFire: 2, fabricate: 2, phase: 2, fortify: 2, shield: 2,
+};
+export const RANGED_NODES = {
+  sentinel: { label: "Obelisk fire", range: 2, stat: "obeliskShots" },
+  vanguard: { label: "Vanguard fire", range: 3, stat: "vanguardShots" },
 };
 const TURN_MS = 1000 * TURN_SECONDS;
 const DEPOSITS = nodes.filter(({ node }) => node.type === "deposit").map(({ id }) => id);
 const FIELD_GENERATORS = Object.fromEntries(SIDES.map((side) => [side, nodes
   .filter(({ node }) => node.home === side && isFieldGenerator(node)).map(({ id }) => id)]));
 const VOID_REINFORCEMENTS = 30;
-const CACHE_TILES = [161, 163, 137, 187, 160, 164, 186, 188, 135, 189];
 const ACTION_SOUNDS = {
   place: "place", spawn: "deploy", "forward-deploy": "deploy", fabricate: "fabricate",
-  salvage: "salvage", fortify: "fortify", fire: "fire", "phase-jump": "phase-jump",
+  fortify: "fortify", fire: "fire", "phase-jump": "phase-jump",
 };
 const AUGMENT_SOUNDS = { defensive: "strike", emp: "emp" };
-const HIT_STATS = { move: "moveCaptures", hop: "hopCaptures", fire: "obeliskShots", defensive: "defensiveStrikes" };
+const HIT_STATS = { move: "moveCaptures", hop: "hopCaptures", defensive: "defensiveStrikes" };
 
 export function createGame({ now = Date.now(), passAndPlay = false, selectSpecies = true } = {}) {
   return {
@@ -125,12 +127,6 @@ function isFieldGenerator(node) {
   return node?.type === "aegis" || node?.type === "sentinel";
 }
 
-function shieldActivation(game, id) {
-  const activation = game.activatedShields?.[id];
-  // Existing matches only stored the activating team.
-  return typeof activation === "string" ? { side: activation, at: 0 } : activation;
-}
-
 function fieldShieldController(game, id) {
   const side = shieldActivation(game, id)?.side;
   if (!side || nodeController(game, id) !== side || shieldsJammed(game, side)) return null;
@@ -204,9 +200,17 @@ function mayEnter(side, to) {
 function addReserve(game, side, count = 1) {
   if (effectOnTurn(game, side, "disablerTurn")) {
     log(game, `${sideName(side)}’s reinforcements were blocked by Troop Disabler.`, "blocked");
-    return;
+    return false;
   }
   game.players[side].reserve += count;
+  return true;
+}
+
+function collectCache(game, id, side) {
+  if (!game.caches?.includes(id) || !addReserve(game, side)) return;
+  game.caches = game.caches.filter((tile) => tile !== id);
+  record(game, side, "salvaged");
+  log(game, `${sideName(side)} recovered a salvage cache at ${tileLabel(id)}.`, "salvage");
 }
 
 function claimNode(game, id, side) {
@@ -230,6 +234,7 @@ function transferProxy(game, from, to) {
   delete proxy.fortified;
   delete game.proxies[from];
   game.proxies[to] = proxy;
+  collectCache(game, to, proxy.side);
   if (to === nexus[otherSide(proxy.side)]) finishGame(game, proxy.side, "nexus");
 }
 
@@ -246,6 +251,7 @@ function place(game, id, side, starting) {
     else player.reserve -= 1;
     record(game, side, "deployed");
   }
+  collectCache(game, id, side);
 }
 
 function finishGame(game, winner, result) {
@@ -296,10 +302,7 @@ function nextTurn(game, now) {
     log(game, `${sideName(side)} is placing starting Proxies.`);
     return;
   }
-  if (side === "blue") {
-    game.round += 1;
-    if (game.round % 3 === 0) surfaceCache(game);
-  }
+  if (side === "blue") game.round += 1;
   const player = game.players[side];
   player.turns += 1;
 
@@ -317,6 +320,7 @@ function nextTurn(game, now) {
     }
     delete claim.pendingAt;
   }
+  if (side === "blue" && game.round % 3 === 0) surfaceCaches(game);
 
   let activated = 0;
   for (const [id, proxy] of Object.entries(game.proxies)) {
@@ -336,15 +340,17 @@ function nextTurn(game, now) {
   log(game, `${sideName(side)} began its turn with ${player.tv} TV.`);
 }
 
-function surfaceCache(game) {
+function surfaceCaches(game) {
   const caches = game.caches ??= [];
-  const first = game.round / 3 - 1;
-  for (let i = 0; i < CACHE_TILES.length; i += 1) {
-    const tile = CACHE_TILES[(first + i) % CACHE_TILES.length];
-    if (caches.includes(tile)) continue;
-    caches.push(tile);
-    log(game, `A salvage cache surfaced at ${tileLabel(tile)}.`, "cache");
-    return;
+  const regions = territoryMap(game);
+  const center = (tiles.get(nexus.blue).column + tiles.get(nexus.red).column) / 2;
+  const open = board.filter(({ id }) => !regions.has(id) && !game.proxies[id] && !caches.includes(id));
+  const halves = [open.filter(({ column }) => column <= center), open.filter(({ column }) => column > center)];
+  if (halves.some((half) => half.length === 0)) return;
+  for (const half of halves) {
+    const { id } = half[Math.floor(Math.random() * half.length)];
+    caches.push(id);
+    log(game, `A salvage cache surfaced at ${tileLabel(id)}.`, "cache");
   }
 }
 
@@ -455,24 +461,19 @@ function activeProxyTurn(game, from) {
     && game.proxies[from]?.side === game.activeSide && readyProxy(game, from);
 }
 
-function ascensionActive(game, side, tile) {
-  return game.players[side].augments?.inventory.ascension === "active" && tile.region !== "turbulence";
+function ascensionActive(game, side, from) {
+  return game.players[side].augments?.inventory.ascension === "active" && territoryMap(game).has(from);
 }
 
 export function obeliskFireCost(game, side) {
   return ACTION_COST.fire + (speciesOf(game, side) === "directorate" ? 1 : 0);
 }
 
-function obeliskAccessError(game, from, side) {
-  const node = tiles.get(from)?.node;
-  if (node?.type !== "sentinel" || node.home !== side) return "You can only fire from your home Obelisks.";
-  return nodeController(game, from) !== side ? "Capture this Obelisk to fire from it." : null;
-}
-
-export function obeliskRange(game, from) {
+export function firingRange(game, from) {
   const side = game.activeSide;
-  return activeProxyTurn(game, from) && !obeliskAccessError(game, from, side)
-    ? reachableTiles(game, from, side, 2, true) : [];
+  const gun = RANGED_NODES[tiles.get(from)?.node?.type];
+  return gun && activeProxyTurn(game, from) && nodeController(game, from) === side
+    ? reachableTiles(game, from, side, gun.range, true) : [];
 }
 
 export function nodeOrders(game, from) {
@@ -521,11 +522,7 @@ export function nodeOrders(game, from) {
       reachableEdge(game, side, from, to) && !game.proxies[to] && to !== nexus[otherSide(side)] && mayEnter(side, to)),
     "There’s no legal empty neighboring hex.");
   }
-  if (game.caches?.includes(from)) {
-    const blocker = effectOnTurn(game, side, "disablerTurn") ? "Troop Disabler is blocking reinforcements." : null;
-    add("salvage", ACTION_COST.salvage, blocker);
-  }
-  if (species === "veyari" && tile.region === "turbulence") {
+  if (species === "veyari" && !territoryMap(game).has(from)) {
     const blocker = player.phaseJumpTurn === player.turns ? "You have already used Phase Jump this turn." : null;
     add("phase-jump", ACTION_COST.phase, blocker, () => phaseDestinations(game, from, side), "There’s no open landing hex.");
   }
@@ -534,10 +531,11 @@ export function nodeOrders(game, from) {
       : player.fortificationTurn === player.turns ? "You have already fortified a Proxy this turn." : null;
     add("fortify", ACTION_COST.fortify, blocker);
   }
-  if (node === "sentinel") {
+  if (RANGED_NODES[node]) {
     // Keep the range preview available even when there are no enemies to target.
-    add("fire", obeliskFireCost(game, side), obeliskAccessError(game, from, side),
-      () => obeliskRange(game, from).filter(({ occupied }) => occupied).map(({ to }) => to));
+    const cost = node === "vanguard" ? ACTION_COST.vanguardFire : obeliskFireCost(game, side);
+    add("fire", cost, controlled ? null : "Take control of this hex to fire from it.",
+      () => firingRange(game, from).filter(({ occupied }) => occupied).map(({ to }) => to));
   }
   return orders;
 }
@@ -546,8 +544,7 @@ export function proxyMoves(game, from) {
   const side = game.activeSide;
   const player = game.players[side];
   if (!tiles.has(from) || !activeProxyTurn(game, from) || player.tv < ACTION_COST.move) return [];
-  const tile = tiles.get(from);
-  const ascended = ascensionActive(game, side, tile);
+  const ascended = ascensionActive(game, side, from);
   const captureRange = ascended && player.turns >= 12 ? 2 : 1;
   const moveRange = ascended && player.turns >= 18 ? 2 : 1;
   const canRefund = ascended && player.turns >= 6 && player.ascensionRefundTurn !== player.turns;
@@ -705,8 +702,8 @@ export function defensiveTargets(game, side) {
     game.proxies[id].side !== side && regions.get(id) === side);
 }
 
-function destroyProxies(game, side, targets, attack) {
-  record(game, side, HIT_STATS[attack], attack === "hop" ? targets.length : 1);
+function destroyProxies(game, side, targets, attack, stat = HIT_STATS[attack]) {
+  record(game, side, stat, attack === "hop" ? targets.length : 1);
   const impacts = game.impacts ??= [];
   impacts.push({ revision: game.revision + 1, tiles: [...targets] });
   if (impacts.length > 12) impacts.shift();
@@ -761,6 +758,7 @@ function applyAugment(game, side, action) {
       destroyProxies(game, side, route.hits, "hop");
       soundCue(game, "capture");
     }
+    for (const landing of path.slice(0, -1)) collectCache(game, landing, side);
     transferProxy(game, from, route.current);
     return null;
   }
@@ -802,12 +800,6 @@ function perform(game, side, { type, from, to, cost, refund }) {
       record(game, side, "fabricated");
       log(game, `${name} fabricated a reserve Proxy.`);
       return;
-    case "salvage":
-      game.caches = game.caches.filter((id) => id !== to);
-      addReserve(game, side);
-      record(game, side, "salvaged");
-      log(game, `${name} recovered a salvage cache at ${tileLabel(to)}.`);
-      return;
     case "occupy":
       claimNode(game, to, side);
       return;
@@ -823,7 +815,8 @@ function perform(game, side, { type, from, to, cost, refund }) {
       log(game, `${name} fortified the Proxy at ${tileLabel(from)}.`);
       return;
     case "fire": {
-      const destroyed = destroyProxies(game, side, [to], "fire");
+      const { stat } = RANGED_NODES[tiles.get(from).node.type];
+      const destroyed = destroyProxies(game, side, [to], "fire", stat);
       log(game, `${name} fired from ${tileLabel(from)} at ${tileLabel(to)}${destroyed ? " and destroyed a Proxy" : ""}.`);
       return;
     }

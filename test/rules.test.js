@@ -6,7 +6,7 @@ import {
 } from "../web/board.js";
 import {
   advanceClock, applyAction, baseShieldActive, createGame, nodeController, placementActions,
-  nodeOrders, obeliskRange, proxyActions, readyProxy, shieldWallsForSource, TURN_SECONDS, wallActive,
+  firingRange, nodeOrders, proxyActions, readyProxy, shieldWallsForSource, TURN_SECONDS, wallActive,
 } from "../web/rules.js";
 
 const cost = (type, from, to) => ({ type, from, to });
@@ -421,7 +421,7 @@ test("an Obelisk can fire at a reachable enemy up to two steps away without movi
   const from = sentinels.blue[0];
   const to = 6;
   proxy(game, from, "blue");
-  const emptyRange = obeliskRange(game, from);
+  const emptyRange = firingRange(game, from);
   assert(emptyRange.some((hex) => hex.to === to && hex.steps === 2 && !hex.occupied));
   assert(!proxyActions(game, from).some(({ type }) => type === "fire"));
   proxy(game, to, "red");
@@ -432,6 +432,52 @@ test("an Obelisk can fire at a reachable enemy up to two steps away without movi
   assert.equal(game.proxies[to], undefined);
   assert.equal(game.proxies[from].side, "blue");
   assert.equal(game.players.blue.tv, 5);
+});
+
+test("a captured Obelisk fires for its new controller before the shield is reactivated", () => {
+  const game = playGame();
+  const from = 76; // B4
+  const to = 78; // D4
+  game.activatedShields[from] = "red";
+  proxy(game, from, "blue");
+  proxy(game, to, "red");
+  const shot = cost("fire", from, to);
+  assert.deepEqual(firingRange(game, from), []);
+  assert.match(nodeOrders(game, from).find(({ type }) => type === "fire").error, /Take control/);
+  assert.match(applyAction(game, "blue", shot, start), /unavailable/);
+  assert.equal(applyAction(game, "blue", cost("occupy", from, from), start), null);
+  assert.equal(nodeController(game, from), "blue");
+  assert.equal(game.activatedShields[from], undefined);
+  assert.equal(applyAction(game, "blue", shot, start), null);
+  assert.equal(game.players.blue.tv, 2);
+  assert.equal(game.proxies[to], undefined);
+  assert.equal(game.stats.blue.obeliskShots, 1);
+});
+
+test("a Vanguard fires up to three steps for 2 TV even with its shield offline", () => {
+  const game = playGame();
+  const from = 22; // W1
+  const to = 70; // U3
+  const outsideRange = 95; // U4
+  game.speciesPicks = { blue: "directorate", red: "keth" };
+  proxy(game, from, "blue");
+  proxy(game, to, "red");
+  game.proxies[to].fortified = true;
+  proxy(game, outsideRange, "red");
+  assert(firingRange(game, from).some((hex) => hex.to === to && hex.steps === 3));
+  assert(!firingRange(game, from).some((hex) => hex.to === outsideRange));
+  assert.match(applyAction(game, "blue", cost("fire", from, outsideRange), start), /unavailable/);
+  const shot = cost("fire", from, to);
+  assert.equal(applyAction(game, "blue", shot, start), null);
+  assert.equal(game.players.blue.tv, 4);
+  assert.equal(game.stats.red.hitsAbsorbed, 1);
+  assert.equal(game.proxies[to].side, "red");
+  assert.equal(applyAction(game, "blue", shot, start), null);
+  assert.equal(game.proxies[to], undefined);
+  assert.equal(game.proxies[from].side, "blue");
+  assert.equal(game.stats.blue.vanguardShots, 2);
+  assert.equal(game.stats.blue.obeliskShots, undefined);
+  assert.equal(game.players.blue.tv, 2);
 });
 
 test("a partially powered Nexus can be approached through the open half", () => {

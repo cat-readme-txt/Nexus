@@ -17,7 +17,7 @@ export const SPECIES = [
     id: "keth",
     name: "Keth",
     origin: "Keth was the name of a chain of citadels. Their inhabitants kept it when they left their homeworld.",
-    power: "Once per turn for 2 TV, fortify a Proxy on a controlled Aegis or Obelisk. It absorbs one Obelisk or Defensive Strike hit while it stays there, through the enemy turn. Cradle deployments cost 2 TV.",
+    power: "Once per turn for 2 TV, fortify a Proxy on a controlled Aegis or Obelisk. It absorbs one Obelisk, Vanguard, or Defensive Strike hit while it stays there, through the enemy turn. Cradle deployments cost 2 TV.",
     counter: "Capture fortified Proxies by moving onto their hex, or use two ranged hits in the same turn.",
   },
 ];

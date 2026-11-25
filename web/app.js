@@ -10,8 +10,8 @@ import { runTestCommand } from "./terminal.js";
 import { territoryMap } from "./territory.js";
 import {
   ACTION_COST, advanceClock, allProxies, applyAction, augmentBuyError, augmentEffects, augmentStatus,
-  concedeGame, createGame, defensiveTargets, deploymentCost, fabricationError, forwardActions, freeReserve,
-  hasAugmentDeposit, hopTargets, nodeOrders, obeliskRange, placementActions, proxyMoves, readyProxy,
+  concedeGame, createGame, defensiveTargets, deploymentCost, fabricationError, firingRange, forwardActions, freeReserve,
+  hasAugmentDeposit, hopTargets, nodeOrders, placementActions, proxyMoves, RANGED_NODES, readyProxy,
   STARTING_PROXIES, TURN_SECONDS, VOID_TV_CAP,
 } from "./rules.js";
 
@@ -53,19 +53,18 @@ const view = createBoardView(get("board"), get("board-viewport"), choose, previe
 const augmentRows = AUGMENTS.map(augmentRow);
 const speciesControls = speciesCards(lockSpecies);
 const targetOrders = ["deploy", "fire", "forward", "phase-jump"];
-const tileOrders = ["occupy", "power-shield", "salvage", "fortify"];
+const tileOrders = ["occupy", "power-shield", "fortify"];
 const nodeControls = {
-  occupy: "occupy", "forward-deploy": "forward", salvage: "salvage", fortify: "fortify",
+  occupy: "occupy", "forward-deploy": "forward", fortify: "fortify",
   fire: "fire", "phase-jump": "phase-jump", "power-shield": "power-shield",
 };
 const orderDescriptions = {
   deploy: "Place a reserve Proxy on an empty Cradle hex. It activates next turn.",
   fabricate: "Build one reserve Proxy. Available once every three of your turns with fewer than two active Proxies.",
   forward: "Deploy one reserve Proxy beside this powered Aegis. You can deploy again when you have a legal hex, reserve and TV.",
-  salvage: "Recover one reserve Proxy and remove this salvage cache.",
   occupy: "Take control of this generator. Its offline shield arc turns to face your opponent.",
   "power-shield": "Power this node’s linked shields. They stay active when your Proxy moves away.",
-  fire: "Show reachable hexes up to two steps away, then choose an enemy Proxy to fire on.",
+  fire: "Show reachable hexes and choose an enemy Proxy to fire on.",
   fortify: "Absorb one ranged hit. Armor expires when this Proxy moves or your next turn starts.",
   "phase-jump": "Jump to an empty hex up to three steps away, ignoring shields. Once per turn.",
   "confirm-targets": "Apply the selected targets or route.",
@@ -84,8 +83,12 @@ const orderControls = new Map(Object.keys(orderDescriptions).map((id) => {
   control.before(wrapper);
   wrapper.append(control, help);
   control.setAttribute("aria-describedby", help.id);
-  wrapper.addEventListener("click", () => {
-    if (control.disabled) wrapper.focus();
+  const resetHelp = () => wrapper.removeAttribute("data-help-dismissed");
+  wrapper.addEventListener("pointerenter", resetHelp);
+  wrapper.addEventListener("focusin", resetHelp);
+  control.addEventListener("click", () => wrapper.setAttribute("data-help-dismissed", ""));
+  wrapper.addEventListener("click", (event) => {
+    if (event.target === wrapper && control.disabled) wrapper.focus();
   });
   return [id, { control, wrapper, help }];
 }));
@@ -116,17 +119,18 @@ function targeting() {
   return order === "hop" || order === "defensive";
 }
 
-function previewAction(id, action, inRange) {
+function previewAction(id, action, inRange, region) {
   if (game?.phase !== "play") return;
   const tile = tiles.get(id);
   const name = {
     move: game.proxies[id] ? "Capture Proxy" : "Move", spawn: "Deploy",
-    fire: "Obelisk fire", "hop-target": "Hop landing", "defensive-target": "Defensive Strike target",
+    fire: RANGED_NODES[tiles.get(action?.from)?.node?.type]?.label,
+    "hop-target": "Hop landing", "defensive-target": "Defensive Strike target",
     "forward-deploy": "Forward deploy", "phase-jump": "Phase jump",
   }[action?.type];
   const status = name ? `${tileLabel(id)} · ${name} · ${action.cost} TV${action.refund ? " refunded by Ascension" : ""}`
-    : inRange ? `${tileLabel(id)} · Within Obelisk range`
-      : tile ? `${tileLabel(id)} · ${tileName(tile)}` : playTurnTitle();
+    : inRange ? `${tileLabel(id)} · In firing range`
+      : tile ? `${tileLabel(id)} · ${tileName(tile, region)}` : playTurnTitle();
   text("board-status", status);
 }
 
@@ -530,7 +534,9 @@ function renderMatch() {
   const orderError = turnError ?? (targeting() ? "Confirm or cancel the current plan first." : null);
   const nodeType = tiles.get(selected)?.node?.type;
   const deposit = nodeType === "deposit";
+  const gun = RANGED_NODES[nodeType];
   text("occupy-label", deposit ? "Occupy" : "Capture");
+  if (gun) text("fire-label", gun.label);
   for (const [type, id] of Object.entries(nodeControls)) {
     const command = orders.find((order) => order.type === type);
     hide(id, !showOrders || !command);
@@ -541,10 +547,11 @@ function renderMatch() {
     if (type === "power-shield" && nodeType === "vanguard") {
       description = "Arm this half of the Nexus shield. It needs an active Proxy here and an online home Aegis or Obelisk.";
     }
+    if (type === "fire") description = `Show reachable hexes up to ${gun.range} steps away, then choose an enemy Proxy to fire on.`;
     renderOrderControl(id, orderError ?? command.error, description);
   }
   const showRange = showOrders && order === "fire";
-  const firingRange = showRange ? obeliskRange(game, selected).map(({ to }) => to) : [];
+  const range = showRange ? firingRange(game, selected).map(({ to }) => to) : [];
   hide("range-key", !showRange);
   hide("hop-key", !hasHopLanding);
   hide("linked-shield-key", !wallsBySource.has(inspected) && tiles.get(inspected)?.node?.type !== "nexus");
@@ -573,7 +580,7 @@ function renderMatch() {
   renderHexInspector(get("hex-inspector"), game, inspected, regions.get(inspected));
   if (get("live-stats").open) renderStats(get("live-stats-table"), game);
   view.render(game, { selected, inspect: inspected, actions: targets,
-    planned: plan, mode: order, firingRange, regions, playerSkins: screen === "online" ? onlineSkins : localSkins });
+    planned: plan, mode: order, firingRange: range, regions, playerSkins: screen === "online" ? onlineSkins : localSkins });
   renderClock();
 }
 
