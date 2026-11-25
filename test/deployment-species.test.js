@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { cradles, nodes, tiles, walls } from "../web/board.js";
 import {
-  applyAction, createGame, fabricationError, forwardActions, nodeController, placementActions,
+  applyAction, createGame, fabricationError, forwardActions, nodeController, nodeOrders, placementActions,
   proxyActions, readyProxy, wallActive,
 } from "../web/rules.js";
 
@@ -72,11 +72,22 @@ test("a Turbulence cache surfaces on round three and a ready Proxy can recover i
   assert.match(act(game, { type: "salvage", from, to: from }), /unavailable/);
 });
 
-test("forward deployment consumes a reserve, protects activation timing, and drops the Aegis shield through the enemy turn", () => {
+test("forward deployment needs the augment and a powered Aegis, and can repeat in one turn", () => {
   const game = playing("keth");
   const { id: from } = nodes.find(({ node }) => node.type === "aegis" && node.home === "blue");
   const shield = walls.find(({ source }) => source === from);
   place(game, from);
+  const forwardOrder = () => nodeOrders(game, from).find(({ type }) => type === "forward-deploy");
+  assert.match(forwardOrder().error, /buy the Forward Deployment augment/i);
+  assert.deepEqual(forwardActions(game, from), []);
+  place(game, 162);
+  game.claims[162] = { held: "blue", pending: null };
+  assert.equal(act(game, { type: "buy-augment", augment: "forward" }), null);
+  assert.equal(game.players.blue.tv, 7);
+  assert.match(forwardOrder().error, /must be powered/);
+  assert.equal(act(game, { type: "power-shield", from, to: from }), null);
+  assert.match(forwardOrder().error, /reserve Proxy/);
+  assert.deepEqual(forwardActions(game, from), []);
   game.players.blue.reserve = 2;
   assert(wallActive(game, shield));
   assert.equal(placementActions(game)[0].cost, 2);
@@ -88,14 +99,55 @@ test("forward deployment consumes a reserve, protects activation timing, and dro
   assert.equal(game.players.blue.reserve, 1);
   assert(!readyProxy(game, action.to));
   assert.equal(game.stats.blue.forwardDeployed, 1);
-  assert.equal(wallActive(game, shield), false);
+  const repeat = forwardActions(game, from)[0];
+  assert.equal(act(game, repeat), null);
+  assert.equal(game.players.blue.reserve, 0);
+  assert.equal(game.stats.blue.forwardDeployed, 2);
+  assert(wallActive(game, shield));
   assert.equal(forwardActions(game, from).length, 0);
+  assert.match(forwardOrder().error, /reserve Proxy/);
   assert.equal(act(game, { type: "end" }), null);
-  assert.equal(wallActive(game, shield), false);
+  assert(wallActive(game, shield));
   assert.equal(act(game, { type: "end" }), null);
   assert.equal(wallActive(game, shield), true);
   assert(readyProxy(game, action.to));
+  assert(readyProxy(game, repeat.to));
+});
+
+test("a captured Aegis can be powered for forward deployment, while Obelisks cannot deploy forward", () => {
+  const game = playing();
+  const from = 126;
+  place(game, from);
+  game.players.blue.augments = { inventory: { forward: "active" } };
+  game.players.blue.reserve = 1;
+  assert.deepEqual(forwardActions(game, from), []);
+  assert.equal(act(game, { type: "occupy", from, to: from }), null);
+  assert.deepEqual(forwardActions(game, from), []);
+  assert.equal(act(game, { type: "power-shield", from, to: from }), null);
   assert(forwardActions(game, from).length > 0);
+  place(game, 4);
+  assert.equal(act(game, { type: "power-shield", from: 4, to: 4 }), null);
+  assert.deepEqual(forwardActions(game, 4), []);
+});
+
+test("special node orders retain prices and explain why a selected Proxy cannot act", () => {
+  const game = playing("veyari");
+  game.players.blue.tv = 1;
+  game.caches = [161];
+  place(game, 161);
+  place(game, 162);
+  const expected = [[161, "salvage", 2], [161, "phase-jump", 2], [162, "occupy", 4]];
+  for (const [from, type, cost] of expected) {
+    const order = nodeOrders(game, from).find((order) => order.type === type);
+    assert.equal(order.cost, cost);
+    assert.match(order.error, new RegExp(`Needs ${cost} TV`));
+    assert.deepEqual(order.actions, []);
+    assert(!proxyActions(game, from).some((action) => action.type === type));
+  }
+  place(game, 162, "blue", game.players.blue.turns + 1);
+  assert.match(nodeOrders(game, 162)[0].error, /activates at the start/);
+  place(game, 162, "red");
+  assert.deepEqual(nodeOrders(game, 162), []);
 });
 
 test("Directorate supply depends on staffing a controlled Deposit", () => {
@@ -118,6 +170,9 @@ test("Directorate Obelisk shots cost 2 TV", () => {
   place(game, 4);
   place(game, 6, "red");
   game.players.blue.tv = 1;
+  const fireOrder = nodeOrders(game, 4).find(({ type }) => type === "fire");
+  assert.equal(fireOrder.cost, 2);
+  assert.match(fireOrder.error, /Needs 2 TV/);
   const shot = { type: "fire", from: 4, to: 6 };
   assert.match(act(game, shot), /unavailable/);
   game.players.blue.tv = 2;
@@ -129,9 +184,10 @@ test("Directorate Obelisk shots cost 2 TV", () => {
 test("Veyari jump ignores ordinary shields once per turn and paid occupation costs 4 TV", () => {
   const game = playing("veyari", "directorate");
   place(game, 53);
+  const border = walls.find(({ from, to, side }) => from === 52 && to === 53 && side === "red");
+  game.activatedShields[border.source] = "red";
   const options = proxyActions(game, 53);
   assert.equal(tiles.get(53).region, "turbulence");
-  assert(walls.some(({ from, to, side }) => from === 52 && to === 53 && side === "red"));
   assert(!options.some(({ type, to }) => type === "move" && to === 52));
   const jump = options.find(({ type, to }) => type === "phase-jump" && to === 52);
   assert.equal(jump.cost, 2);

@@ -1,18 +1,25 @@
 import { AUGMENT_BY_ID } from "./augments.js";
 import { speciesById, speciesOf } from "./species.js";
+import { nodeController, territoryMap } from "./territory.js";
 import {
-  cradles, edgeKey, nexus, nodes, otherSide, sentinels, sideName, SIDES,
+  cradles, edgeKey, nexus, nodes, otherSide, sideName, SIDES,
   tileLabel, tileName, tiles, vanguards, wallsByEdge,
 } from "./board.js";
 
+export { nodeController };
+
 export const TURN_SECONDS = 180;
-export const MAX_TV = 30;
+export const MAX_TV = 40;
+export const VOID_TV_CAP = 20;
 export const STARTING_PROXIES = 3;
 export const ACTION_COST = {
   move: 1, spawn: 1, occupy: 3, fire: 1, fabricate: 2, salvage: 2, phase: 2, fortify: 2,
+  shield: 2,
 };
 const TURN_MS = 1000 * TURN_SECONDS;
 const DEPOSITS = nodes.filter(({ node }) => node.type === "deposit").map(({ id }) => id);
+const FIELD_GENERATORS = Object.fromEntries(SIDES.map((side) => [side, nodes
+  .filter(({ node }) => node.home === side && isFieldGenerator(node)).map(({ id }) => id)]));
 const VOID_REINFORCEMENTS = 30;
 const CACHE_TILES = [161, 163, 137, 187, 160, 164, 186, 188, 135, 189];
 const ACTION_SOUNDS = {
@@ -20,7 +27,7 @@ const ACTION_SOUNDS = {
   salvage: "salvage", fortify: "fortify", fire: "fire", "phase-jump": "phase-jump",
 };
 const AUGMENT_SOUNDS = { defensive: "strike", emp: "emp" };
-const HIT_STATS = { move: "moveCaptures", fire: "obeliskShots", defensive: "defensiveStrikes" };
+const HIT_STATS = { move: "moveCaptures", hop: "hopCaptures", fire: "obeliskShots", defensive: "defensiveStrikes" };
 
 export function createGame({ now = Date.now(), passAndPlay = false, selectSpecies = true } = {}) {
   return {
@@ -41,8 +48,8 @@ export function createGame({ now = Date.now(), passAndPlay = false, selectSpecie
     impacts: [],
     soundEvents: [],
     claims: {},
+    activatedShields: {},
     caches: [],
-    forwardDeployments: {},
     stats: { blue: {}, red: {} },
     events: selectSpecies ? [] : ["Blue is placing starting Proxies."],
   };
@@ -106,11 +113,6 @@ export function allProxies(game) {
   return Object.values(game.proxies);
 }
 
-export function nodeController(game, id) {
-  const claim = game.claims[id];
-  return claim?.pending ?? claim?.held ?? tiles.get(id).node.home;
-}
-
 function effectOnTurn(game, side, effect) {
   return game.players[otherSide(side)].augments?.[effect] === game.players[side].turns;
 }
@@ -119,26 +121,35 @@ function shieldsJammed(game, side) {
   return game.players[otherSide(side)].augments?.empRound === game.round;
 }
 
-function obeliskDefenseIntact(game, side) {
-  return sentinels[side].some((id) => nodeController(game, id) === side);
+function isFieldGenerator(node) {
+  return node?.type === "aegis" || node?.type === "sentinel";
+}
+
+function fieldShieldController(game, id) {
+  const side = game.activatedShields?.[id];
+  if (!side || nodeController(game, id) !== side || shieldsJammed(game, side)) return null;
+  return side;
+}
+
+function hasVanguardSupport(game, side) {
+  const enemy = otherSide(side);
+  return FIELD_GENERATORS[side].some((id) => game.proxies[id]?.side !== enemy && fieldShieldController(game, id) === side);
 }
 
 export function baseShieldActive(game, side) {
-  return obeliskDefenseIntact(game, side)
-    && vanguards[side].some((id) => game.proxies[id]?.side === side && readyProxy(game, id));
+  return vanguards[side].some((id) => game.activatedShields?.[id] === side
+    && game.proxies[id]?.side === side && readyProxy(game, id)) && hasVanguardSupport(game, side);
 }
 
-export function forwardingFrom(game, id) {
-  const deployment = game.forwardDeployments?.[id];
-  return !!deployment && game.players[deployment.side].turns === deployment.turn;
+export function shieldController(game, id) {
+  const node = tiles.get(id)?.node;
+  if (node?.type === "vanguard") return baseShieldActive(game, node.home) ? node.home : null;
+  if (isFieldGenerator(node)) return fieldShieldController(game, id);
+  return null;
 }
 
 export function shieldSourceActive(game, id) {
-  const node = tiles.get(id)?.node;
-  if (node?.type === "vanguard") return baseShieldActive(game, node.home);
-  if (node?.type === "nexus") return obeliskDefenseIntact(game, node.home);
-  if (node?.type !== "aegis" && node?.type !== "sentinel") return false;
-  return nodeController(game, id) === node.home && !shieldsJammed(game, node.home) && !forwardingFrom(game, id);
+  return !!shieldController(game, id);
 }
 
 export function wallActive(game, wall) {
@@ -148,7 +159,7 @@ export function wallActive(game, wall) {
 function shieldBetween(game, side, from, to) {
   const enemy = otherSide(side);
   if ((from === nexus[enemy] || to === nexus[enemy]) && baseShieldActive(game, enemy)) return true;
-  return wallsByEdge.get(edgeKey(from, to))?.some((wall) => wall.side === enemy && wallActive(game, wall)) ?? false;
+  return wallsByEdge.get(edgeKey(from, to))?.some(({ source }) => shieldController(game, source) === enemy) ?? false;
 }
 
 function reachableEdge(game, side, from, to) {
@@ -158,12 +169,6 @@ function reachableEdge(game, side, from, to) {
 function mayEnter(side, to) {
   const node = tiles.get(to).node;
   return node?.type !== "vanguard" || node.home === side;
-}
-
-function occupiable(game, id, side) {
-  const node = tiles.get(id).node;
-  return node && (node.type === "deposit" || node.type === "sentinel" || node.type === "aegis")
-    && nodeController(game, id) !== side && game.proxies[id]?.side === side && readyProxy(game, id);
 }
 
 function addReserve(game, side, count = 1) {
@@ -177,11 +182,14 @@ function addReserve(game, side, count = 1) {
 function claimNode(game, id, side) {
   if (nodeController(game, id) === side) return;
   const node = tiles.get(id).node;
+  const at = game.revision + 1;
   if (node.type === "deposit") {
-    game.claims[id] = { held: game.claims[id]?.held ?? node.home, pending: side };
+    const previous = game.claims[id];
+    game.claims[id] = { held: previous?.held ?? node.home, heldAt: previous?.heldAt, pending: side, pendingAt: at };
     addReserve(game, side);
   } else {
-    game.claims[id] = { held: side, pending: null };
+    game.claims[id] = { held: side, heldAt: at, pending: null };
+    if (game.activatedShields) delete game.activatedShields[id];
   }
   record(game, side, "claims");
   log(game, `${sideName(side)} claimed ${tileName(tiles.get(id))} at ${tileLabel(id)}.`, "claim");
@@ -243,8 +251,7 @@ function nextTurn(game, now) {
   const outgoing = game.players[previous];
   if (outgoing.augments?.overloadArmed) {
     outgoing.augments.overloadArmed = false;
-    outgoing.augments.bankedTV = Math.floor(outgoing.tv / 2);
-    log(game, `${sideName(previous)} banked ${outgoing.augments.bankedTV} TV.`);
+    bankOverload(game, previous);
   }
   outgoing.tv = 0;
   if (game.phase === "setup" && previous === "red") game.phase = "play";
@@ -271,12 +278,14 @@ function nextTurn(game, now) {
     if (claim?.pending !== side) continue;
     if (node.type !== "deposit" || game.proxies[id]?.side === side) {
       claim.held = side;
+      claim.heldAt = claim.pendingAt;
       claim.pending = null;
     } else {
       log(game, `${tileName(tiles.get(id))} occupation at ${tileLabel(id)} was denied.`, "blocked");
       if (claim.held === node.home) delete game.claims[id];
       else claim.pending = null;
     }
+    delete claim.pendingAt;
   }
 
   let activated = 0;
@@ -290,7 +299,7 @@ function nextTurn(game, now) {
     addReserve(game, side);
     record(game, side, "speciesPowers");
   }
-  player.tv = Math.min(player.augments?.void ? 20 : MAX_TV, 3 + activated + (supplied ? 3 : 0));
+  player.tv = Math.min(player.augments?.void ? VOID_TV_CAP : MAX_TV, 3 + activated + (supplied ? 3 : 0));
   record(game, side, "tvEarned", player.tv);
   player.tv += player.augments?.bankedTV ?? 0;
   if (player.augments?.bankedTV) player.augments.bankedTV = 0;
@@ -340,7 +349,7 @@ export function advanceClock(game, now = Date.now()) {
 }
 
 export function deploymentCost(game, side, forward = false) {
-  if (freeReserve(game, side)) return 0;
+  if (game.players[side].augments?.void || freeReserve(game, side)) return 0;
   return ACTION_COST.spawn + (!forward && speciesOf(game, side) === "keth" ? 1 : 0);
 }
 
@@ -369,16 +378,7 @@ export function fabricationError(game, side) {
 }
 
 export function forwardActions(game, from) {
-  if (!tiles.has(from) || !activeProxyTurn(game, from)) return [];
-  const side = game.activeSide;
-  const cost = deploymentCost(game, side, true);
-  const tile = tiles.get(from);
-  if (tile.node?.type !== "aegis" || nodeController(game, from) !== side || forwardingFrom(game, from)
-      || !hasReserve(game, side) || game.players[side].tv < cost) return [];
-  return tile.neighbors
-    .filter((to) => reachableEdge(game, side, from, to)
-      && !game.proxies[to] && to !== nexus[otherSide(side)] && mayEnter(side, to))
-    .map((to) => ({ type: "forward-deploy", from, to, cost }));
+  return nodeOrders(game, from).find(({ type }) => type === "forward-deploy")?.actions ?? [];
 }
 
 function phaseDestinations(game, from, side) {
@@ -433,60 +433,108 @@ export function obeliskFireCost(game, side) {
   return ACTION_COST.fire + (speciesOf(game, side) === "directorate" ? 1 : 0);
 }
 
-export function canFireFrom(game, from) {
+function obeliskAccessError(game, from, side) {
   const node = tiles.get(from)?.node;
-  const side = game.activeSide;
-  return activeProxyTurn(game, from) && node?.type === "sentinel"
-    && node.home === side && nodeController(game, from) === side;
+  if (node?.type !== "sentinel" || node.home !== side) return "You can only fire from your home Obelisks.";
+  return nodeController(game, from) !== side ? "Capture this Obelisk to fire from it." : null;
 }
 
 export function obeliskRange(game, from) {
-  return canFireFrom(game, from) ? reachableTiles(game, from, game.activeSide, 2, true) : [];
+  const side = game.activeSide;
+  return activeProxyTurn(game, from) && !obeliskAccessError(game, from, side)
+    ? reachableTiles(game, from, side, 2, true) : [];
 }
 
-export function proxyActions(game, from) {
+export function nodeOrders(game, from) {
+  const side = game.activeSide;
+  const tile = tiles.get(from);
+  if (!tile || game.phase !== "play" || game.proxies[from]?.side !== side) return [];
+
+  const player = game.players[side];
+  const species = speciesOf(game, side);
+  const node = tile.node?.type;
+  const generator = isFieldGenerator(tile.node);
+  const controlled = !!node && nodeController(game, from) === side;
+  const sourceError = game.deadline === null ? "Start your turn to issue orders."
+    : readyProxy(game, from) ? null : "This Proxy activates at the start of your next turn.";
+  const orders = [];
+  const add = (type, cost, blocker, destinations = () => [from], emptyError = null) => {
+    let error = sourceError ?? blocker;
+    if (!error && player.tv < cost) error = `Needs ${cost} TV. You have ${player.tv} TV.`;
+    const actions = error ? [] : destinations().map((to) => ({ type, from, to, cost }));
+    if (!error && !actions.length) error = emptyError;
+    orders.push({ type, cost, error, actions });
+  };
+
+  if (generator || node === "deposit") {
+    const cost = node === "aegis" ? 0 : ACTION_COST.occupy + (species === "veyari" ? 1 : 0);
+    add("occupy", cost, controlled ? "You already control this hex." : null);
+  }
+  if (generator || node === "vanguard") {
+    let blocker = null;
+    if (!controlled) blocker = "Take control of this hex to activate its shield.";
+    else if (game.activatedShields?.[from] === side) {
+      blocker = node === "vanguard" && !hasVanguardSupport(game, side)
+        ? "Activated. It needs at least one online home Aegis or Obelisk to protect the Nexus."
+        : "This shield has already been activated.";
+    }
+    add("power-shield", ACTION_COST.shield, blocker);
+  }
+  if (node === "aegis") {
+    let blocker = null;
+    if (!controlled) blocker = "Capture this Aegis first.";
+    else if (player.augments?.void) blocker = "The Call of Void locks Forward Deployment.";
+    else if (augmentStatus(game, side, "forward") !== "active") blocker = "Buy the Forward Deployment augment first.";
+    else if (!shieldSourceActive(game, from)) blocker = "This Aegis must be powered.";
+    else if (!hasReserve(game, side)) blocker = "You need a reserve Proxy.";
+    add("forward-deploy", deploymentCost(game, side, true), blocker, () => tile.neighbors.filter((to) =>
+      reachableEdge(game, side, from, to) && !game.proxies[to] && to !== nexus[otherSide(side)] && mayEnter(side, to)),
+    "There’s no legal empty neighboring hex.");
+  }
+  if (game.caches?.includes(from)) {
+    const blocker = effectOnTurn(game, side, "disablerTurn") ? "Troop Disabler is blocking reinforcements." : null;
+    add("salvage", ACTION_COST.salvage, blocker);
+  }
+  if (species === "veyari" && tile.region === "turbulence") {
+    const blocker = player.phaseJumpTurn === player.turns ? "You have already used Phase Jump this turn." : null;
+    add("phase-jump", ACTION_COST.phase, blocker, () => phaseDestinations(game, from, side), "There’s no open landing hex.");
+  }
+  if (species === "keth" && generator) {
+    const blocker = !controlled ? "Take control of this hex to fortify."
+      : player.fortificationTurn === player.turns ? "You have already fortified a Proxy this turn." : null;
+    add("fortify", ACTION_COST.fortify, blocker);
+  }
+  if (node === "sentinel") {
+    // Keep the range preview available even when there are no enemies to target.
+    add("fire", obeliskFireCost(game, side), obeliskAccessError(game, from, side),
+      () => obeliskRange(game, from).filter(({ occupied }) => occupied).map(({ to }) => to));
+  }
+  return orders;
+}
+
+export function proxyMoves(game, from) {
   const side = game.activeSide;
   const player = game.players[side];
-  if (!tiles.has(from) || !activeProxyTurn(game, from)) return [];
+  if (!tiles.has(from) || !activeProxyTurn(game, from) || player.tv < ACTION_COST.move) return [];
   const tile = tiles.get(from);
-  const species = speciesOf(game, side);
   const ascended = ascensionActive(game, side, tile);
   const captureRange = ascended && player.turns >= 12 ? 2 : 1;
   const moveRange = ascended && player.turns >= 18 ? 2 : 1;
   const canRefund = ascended && player.turns >= 6 && player.ascensionRefundTurn !== player.turns;
   const actions = [];
-  const add = (type, to, cost, details) => {
-    if (player.tv >= cost) actions.push({ type, from, to, cost, ...details });
-  };
-  if (player.tv >= ACTION_COST.move) {
-    for (const { to, occupied, steps } of reachableTiles(game, from, side, captureRange)) {
-      if (steps <= (occupied ? captureRange : moveRange)) {
-        add("move", to, ACTION_COST.move, occupied && canRefund ? { refund: ACTION_COST.move } : undefined);
-      }
-    }
-  }
-  if (occupiable(game, from, side)) {
-    add("occupy", from, tile.node.type === "aegis" ? 0 : ACTION_COST.occupy + (species === "veyari" ? 1 : 0));
-  }
-  if (game.caches?.includes(from) && !effectOnTurn(game, side, "disablerTurn")) {
-    add("salvage", from, ACTION_COST.salvage);
-  }
-  if (species === "veyari" && player.phaseJumpTurn !== player.turns && tile.region === "turbulence"
-      && player.tv >= ACTION_COST.phase) {
-    for (const to of phaseDestinations(game, from, side)) add("phase-jump", to, ACTION_COST.phase);
-  }
-  if (species === "keth" && player.fortificationTurn !== player.turns
-      && (tile.node?.type === "aegis" || tile.node?.type === "sentinel")
-      && nodeController(game, from) === side) {
-    add("fortify", from, ACTION_COST.fortify);
-  }
-  const fireCost = obeliskFireCost(game, side);
-  if (player.tv >= fireCost) {
-    for (const { to, occupied } of obeliskRange(game, from)) {
-      if (occupied) add("fire", to, fireCost);
+  for (const { to, occupied, steps } of reachableTiles(game, from, side, captureRange)) {
+    if (steps <= (occupied ? captureRange : moveRange)) {
+      const action = { type: "move", from, to, cost: ACTION_COST.move };
+      if (occupied && canRefund) action.refund = ACTION_COST.move;
+      actions.push(action);
     }
   }
   return actions;
+}
+
+export function proxyActions(game, from) {
+  const specialActions = nodeOrders(game, from).filter(({ type }) => type !== "forward-deploy").flatMap(({ actions }) => actions);
+  return [...proxyMoves(game, from), ...specialActions];
 }
 
 export function hasAugmentDeposit(game, side) {
@@ -497,7 +545,7 @@ export function hasAugmentDeposit(game, side) {
 export function augmentStatus(game, side, id) {
   const state = game.players[side].augments;
   if (state?.void) return id === "void" ? "active" : "locked";
-  const status = state?.inventory[id];
+  const status = state?.inventory?.[id];
   // Older matches could have purchased Hop as a single-use augment.
   if (id === "hop" && (status === "ready" || status === "used")) return "active";
   return status ?? "available";
@@ -516,10 +564,10 @@ export function augmentBuyError(game, side, id, hasDeposit = hasAugmentDeposit(g
 export function augmentEffects(game, side) {
   const state = game.players[side].augments;
   const labels = [];
-  if (state?.void) labels.push("Void · 20 TV cap");
+  if (state?.void) labels.push(`Void · ${VOID_TV_CAP} TV cap`);
   if (augmentStatus(game, side, "hop") === "active") labels.push("Hop");
+  if (augmentStatus(game, side, "forward") === "active") labels.push("Forward Deploy");
   if (state?.inventory.ascension === "active") labels.push("Ascension");
-  if (state?.overloadArmed) labels.push("Overload armed");
   if (state?.bankedTV) labels.push(`${state.bankedTV} TV banked`);
   if (shieldsJammed(game, side)) labels.push("Shields jammed");
   if (effectOnTurn(game, side, "disablerTurn") && game.activeSide === side) labels.push("Reinforcements blocked");
@@ -531,17 +579,18 @@ function buyAugment(game, side, id) {
   const player = game.players[side];
   spend(game, side, AUGMENT_BY_ID.get(id).price);
   const state = player.augments ??= { inventory: {} };
-  state.inventory[id] = id === "hop" ? "active" : "ready";
+  state.inventory[id] = id === "hop" || id === "forward" ? "active" : "ready";
   if (id === "void") {
     record(game, side, "augmentUses");
     player.augments = { inventory: {}, void: true, freeProxies: VOID_REINFORCEMENTS };
-    player.tv = Math.min(player.tv, 20);
+    player.tv = Math.min(player.tv, VOID_TV_CAP);
     for (const to of cradles[side]) {
       if (!game.proxies[to] && freeReserve(game, side)) place(game, to, side, false);
     }
     log(game, `${sideName(side)} invoked The Call of Void and received ${VOID_REINFORCEMENTS} Proxies.`, "void");
   } else {
     log(game, `${sideName(side)} bought ${AUGMENT_BY_ID.get(id).name}.`, "purchase");
+    if (id === "overload") activateAugment(game, side, id);
   }
 }
 
@@ -551,6 +600,14 @@ function consume(game, side, id, status = "used") {
   log(game, `${sideName(side)} used ${AUGMENT_BY_ID.get(id).name}.`, AUGMENT_SOUNDS[id] ?? "augment");
 }
 
+function bankOverload(game, side) {
+  const player = game.players[side];
+  const amount = Math.ceil(player.tv / 2);
+  player.tv -= amount;
+  player.augments.bankedTV = amount;
+  log(game, `${sideName(side)} banked ${amount} TV for its next turn.`);
+}
+
 function activateAugment(game, side, id) {
   const state = game.players[side].augments;
   const nextEnemyTurn = game.players[otherSide(side)].turns + 1;
@@ -558,10 +615,13 @@ function activateAugment(game, side, id) {
     case "ascension":
       consume(game, side, id, "active");
       return null;
-    case "overload": state.overloadArmed = true; break;
+    case "overload": bankOverload(game, side); break;
     case "emp": state.empRound = game.round; break;
     case "disabler": state.disablerTurn = nextEnemyTurn; break;
-    case "retaliation": state.retaliationTurn = nextEnemyTurn; break;
+    case "retaliation":
+      state.retaliationTurn = nextEnemyTurn;
+      state.retaliationDrained = 0;
+      break;
     default: return "Choose targets on the board to use this augment.";
   }
   consume(game, side, id);
@@ -575,7 +635,7 @@ function nextHops(game, side, from, visited) {
     if (mid === null || !game.proxies[mid] || visited.has(mid) || !reachableEdge(game, side, from, mid)) continue;
     const to = tiles.get(mid).neighbors[direction];
     if (to !== null && !game.proxies[to] && !visited.has(to)
-        && mayEnter(side, to) && reachableEdge(game, side, mid, to)) destinations.push(to);
+        && mayEnter(side, to) && reachableEdge(game, side, mid, to)) destinations.push({ to, over: mid });
   }
   return destinations;
 }
@@ -584,35 +644,46 @@ function hopRoute(game, from, path) {
   const side = game.activeSide;
   if (!tiles.has(from) || !activeProxyTurn(game, from) || augmentStatus(game, side, "hop") !== "active"
       || game.players[side].tv < ACTION_COST.move || !Array.isArray(path) || path.length >= tiles.size) return null;
+  // Validate the entire route against its own changes before touching the match state.
+  const projected = path.length ? { ...game, proxies: { ...game.proxies } } : game;
   const visited = new Set([from]);
+  const hits = [];
   let current = from;
   for (const to of path) {
-    if (!nextHops(game, side, current, visited).includes(to)) return null;
+    const hop = nextHops(projected, side, current, visited).find((candidate) => candidate.to === to);
+    if (!hop) return null;
+    if (projected.proxies[hop.over].side !== side) {
+      hits.push(hop.over);
+      delete projected.proxies[hop.over];
+    }
+    projected.proxies[to] = projected.proxies[current];
+    delete projected.proxies[current];
     visited.add(to);
     current = to;
   }
-  return { current, visited };
+  return { current, visited, hits, projected };
 }
 
 export function hopTargets(game, from, path = []) {
   const route = hopRoute(game, from, path);
-  return route ? nextHops(game, game.activeSide, route.current, route.visited) : [];
+  return route ? nextHops(route.projected, game.activeSide, route.current, route.visited).map(({ to }) => to) : [];
 }
 
 export function defensiveTargets(game, side) {
+  const regions = territoryMap(game);
   return Object.keys(game.proxies).map(Number).filter((id) =>
-    game.proxies[id].side !== side && tiles.get(id).region === side);
+    game.proxies[id].side !== side && regions.get(id) === side);
 }
 
 function destroyProxies(game, side, targets, attack) {
-  record(game, side, HIT_STATS[attack]);
+  record(game, side, HIT_STATS[attack], attack === "hop" ? targets.length : 1);
   const impacts = game.impacts ??= [];
   impacts.push({ revision: game.revision + 1, tiles: [...targets] });
   if (impacts.length > 12) impacts.shift();
   let destroyed = 0;
   for (const to of targets) {
     const proxy = game.proxies[to];
-    if (attack !== "move" && proxy.fortified) {
+    if ((attack === "fire" || attack === "defensive") && proxy.fortified) {
       delete proxy.fortified;
       record(game, proxy.side, "hitsAbsorbed");
       log(game, `Fortification at ${tileLabel(to)} absorbed the hit.`, "blocked");
@@ -626,11 +697,16 @@ function destroyProxies(game, side, targets, attack) {
     addReserve(game, side, destroyed);
     record(game, side, "eliminated", destroyed);
   }
-  if (attack !== "fire" && effectOnTurn(game, side, "retaliationTurn")) {
+  if (attack !== "fire" && destroyed && effectOnTurn(game, side, "retaliationTurn")) {
     const player = game.players[side];
-    const lost = Math.min(player.tv, 5 * targets.length);
-    player.tv -= lost;
-    log(game, `${sideName(side)} lost ${lost} TV to Deadly Retaliation.`, "retaliation");
+    const retaliation = game.players[otherSide(side)].augments;
+    const drained = retaliation.retaliationDrained ?? 0;
+    const lost = Math.min(player.tv, 2 * destroyed, 10 - drained);
+    if (lost > 0) {
+      player.tv -= lost;
+      retaliation.retaliationDrained = drained + lost;
+      log(game, `${sideName(side)} lost ${lost} TV to Deadly Retaliation.`, "retaliation");
+    }
   }
   return destroyed;
 }
@@ -648,7 +724,13 @@ function applyAugment(game, side, action) {
     if (!route || !path.length) return "Choose a legal hop route.";
     spend(game, side, ACTION_COST.move);
     record(game, side, "augmentUses");
-    log(game, `${sideName(side)} hopped ${tileLabel(from)} to ${tileLabel(route.current)}.`, "hop");
+    const count = route.hits.length;
+    const captures = count ? ` and captured ${count} ${count === 1 ? "Proxy" : "Proxies"}` : "";
+    log(game, `${sideName(side)} hopped ${tileLabel(from)} to ${tileLabel(route.current)}${captures}.`, "hop");
+    if (count) {
+      destroyProxies(game, side, route.hits, "hop");
+      soundCue(game, "capture");
+    }
     transferProxy(game, from, route.current);
     return null;
   }
@@ -681,7 +763,6 @@ function perform(game, side, { type, from, to, cost, refund }) {
       return;
     case "forward-deploy":
       place(game, to, side, false);
-      (game.forwardDeployments ??= {})[from] = { side, turn: player.turns };
       record(game, side, "forwardDeployed");
       log(game, `${name} deployed a Proxy from ${tileLabel(from)} to ${tileLabel(to)}.`);
       return;
@@ -699,6 +780,11 @@ function perform(game, side, { type, from, to, cost, refund }) {
       return;
     case "occupy":
       claimNode(game, to, side);
+      return;
+    case "power-shield":
+      (game.activatedShields ??= {})[to] = side;
+      record(game, side, "shieldsActivated");
+      log(game, `${name} activated the shield at ${tileLabel(to)}.`);
       return;
     case "fortify":
       game.proxies[from].fortified = true;
@@ -767,9 +853,12 @@ export function applyAction(game, side, action, now = Date.now()) {
         if (!legal) return "That action is unavailable.";
         perform(game, side, legal);
       }
-      if ((game.phase === "setup" && game.players[side].placed === STARTING_PROXIES)
-          || (game.phase === "play" && game.players[side].tv === 0
-            && !nodes.some(({ id, node }) => node.type === "aegis" && occupiable(game, id, side)))) {
+      const setupComplete = game.phase === "setup" && game.players[side].placed === STARTING_PROXIES;
+      const outOfOrders = game.phase === "play" && game.players[side].tv === 0
+        && !(deploymentCost(game, side) === 0 && placementActions(game).length)
+        && !nodes.some(({ id, node }) => node.type === "aegis" && activeProxyTurn(game, id)
+          && nodeController(game, id) !== side);
+      if (setupComplete || outOfOrders) {
         nextTurn(game, now);
       }
     }

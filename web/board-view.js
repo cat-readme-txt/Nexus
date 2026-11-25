@@ -1,12 +1,13 @@
-import { board, nexus, SIDES, sideName, tileLabel, tileName, tiles, walls } from "./board.js";
+import { board, nexus, SIDES, sideName, tileLabel, tileName, tiles, vanguards, walls, wallsBySource } from "./board.js";
 import { NODE_ICONS } from "./hex-inspector.js";
 import { DEFAULT_PROXY_SKIN } from "./proxy-skins.js";
-import { baseShieldActive, nodeController, proxyReady, wallActive } from "./rules.js";
+import { baseShieldActive, nodeController, proxyReady, shieldController } from "./rules.js";
 
 export const IMPACT_MS = 220;
 const RADIUS = 25;
 const HEIGHT = Math.sqrt(3) * RADIUS;
 const PAD = 17;
+const SHIELD_SOURCES = [...wallsBySource.keys()];
 const WIDTH = 2 * PAD + 2 * RADIUS + 24 * 1.5 * RADIUS;
 const MAP_HEIGHT = 2 * PAD + 14 * HEIGHT;
 const POINTS = [[1, 0], [.5, Math.sqrt(3) / 2], [-.5, Math.sqrt(3) / 2],
@@ -65,6 +66,7 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
   let targets = new Map();
   let plan = [];
   let range = new Set();
+  let regions = new Map();
   let revision = null;
   const flashes = new Map();
   const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
@@ -109,7 +111,8 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
     const isHovered = tile.id === hovered;
     const planned = plan.includes(tile.id);
     const inRange = range.has(tile.id);
-    const [fill, edge] = terrain[tile.cradle ? "cradle" : tile.region];
+    const region = regions.get(tile.id) ?? tile.region;
+    const [fill, edge] = terrain[tile.cradle === region ? "cradle" : region];
     const kind = tile.node?.type;
     const controller = game && tile.node ? nodeController(game, tile.id) : null;
     const captured = controller && controller !== tile.node.home;
@@ -230,7 +233,7 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
     ctx.restore();
   }
 
-  function drawWall({ from, to, side, source }, active) {
+  function drawWall({ from, to, side }, controller, linked) {
     const a = centers.get(from);
     const b = centers.get(to);
     const x = (a.x + b.x) / 2;
@@ -241,7 +244,7 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
     ctx.beginPath();
     ctx.moveTo(x - dx, y - dy);
     ctx.lineTo(x + dx, y + dy);
-    drawShield(team[side].wall, active, source === inspected);
+    drawShield(team[controller ?? side].wall, !!controller, linked);
   }
 
   function drawShield(color, active, linked = false) {
@@ -319,14 +322,17 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
       ctx.setTransform(canvas.width / WIDTH, 0, 0, canvas.height / MAP_HEIGHT, 0, 0);
       ctx.clearRect(0, 0, WIDTH, MAP_HEIGHT);
       for (const tile of board) drawTile(tile);
+      const node = tiles.get(inspected)?.node;
+      const inspectedBase = node?.type === "nexus" || node?.type === "vanguard" ? node.home : null;
+      const controllers = new Map(SHIELD_SOURCES.map((source) => [source, game ? shieldController(game, source) : null]));
       for (const wall of walls) {
-        const active = !game || wallActive(game, wall);
-        drawWall(wall, active);
+        const linked = wall.source === inspected || (wall.side === inspectedBase && vanguards[wall.side].includes(wall.source));
+        drawWall(wall, controllers.get(wall.source), linked);
       }
       for (const side of SIDES) {
         const { x, y } = centers.get(nexus[side]);
         hex(x, y, RADIUS * .85);
-        drawShield("#ffdc90", game && baseShieldActive(game, side));
+        drawShield("#ffdc90", game && baseShieldActive(game, side), side === inspectedBase);
       }
       drawPlan();
       drawImpacts(time);
@@ -375,6 +381,8 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
     const proxy = game?.proxies[cursor];
     const action = targets.get(cursor);
     let label = `${tileLabel(cursor)}, ${tileName(tile)}`;
+    const region = regions.get(cursor);
+    if (region && region !== tile.region) label += `, ${sideName(region)} region`;
     if (game?.caches?.includes(cursor)) label += ", salvage cache";
     if (proxy) label += `, ${sideName(proxy.side)} ${proxy.fortified ? "fortified Proxy" : "Proxy"}`;
     if (action) {
@@ -438,6 +446,7 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
   return {
     render(state, {
       selected = null, inspect = null, actions = [], planned = [], mode = "move", firingRange = [], playerSkins: skins = {},
+      regions: currentRegions = new Map(),
     } = {}) {
       showNewImpacts(state);
       game = state;
@@ -445,6 +454,7 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
       inspected = inspect;
       targets = new Map(actions.map((action) => [action.to, action]));
       range = new Set(firingRange);
+      regions = currentRegions;
       plan = planned;
       order = mode;
       playerSkins = skins;

@@ -1,5 +1,6 @@
-import { sideName, tileLabel, tileName, tiles, wallsBySource } from "./board.js";
-import { baseShieldActive, forwardingFrom, nodeController, proxyReady, shieldSourceActive } from "./rules.js";
+import { sideName, tileLabel, tileName, tiles, vanguards, wallsBySource } from "./board.js";
+import { ACTION_COST, baseShieldActive, nodeController, proxyReady, shieldSourceActive } from "./rules.js";
+import { specialHexLinks } from "./territory.js";
 
 export const NODE_ICONS = {
   aegis: { file: "./assets/aegis.png", size: 24 },
@@ -11,9 +12,9 @@ export const NODE_ICONS = {
 
 const descriptions = {
   nexus: "Enter the enemy Nexus to win. A powered Vanguard shield protects it.",
-  vanguard: "An active friendly Proxy powers the Nexus shield here. The shield falls if the enemy controls all eight home Obelisks.",
-  sentinel: "Capture with a Proxy on this hex to disable or restore its linked borders. Base cost is 3 TV. Obelisk fire costs 1 TV before modifiers and reaches up to two hexes.",
-  aegis: "Capture for free with a Proxy on this hex to disable or restore its linked borders. A staffed, controlled Aegis can deploy a reserve Proxy to a neighboring hex.",
+  vanguard: "Pay 2 TV with an active friendly Proxy here to arm the Nexus shield. Keep an active Proxy on an armed Vanguard and at least one home Aegis or Obelisk online to protect the Nexus.",
+  sentinel: "Activate its linked field shield for 2 TV. Base capture cost is 3 TV. Home Obelisk fire costs 1 TV before modifiers and reaches up to two hexes.",
+  aegis: "Capture for free and activate its shield for 2 TV. With the Forward Deployment augment, a staffed and powered Aegis can deploy reserve Proxies to legal neighbors.",
   deposit: "Claim it to gain one reserve Proxy. Keep an active Proxy on a Deposit you control to buy augments.",
   cradle: "Place starting Proxies here or deploy from reserve. Deployed Proxies activate on your next turn.",
   turbulence: "Veyari can phase jump from this terrain. Ascension bonuses are inactive here, and salvage caches can appear.",
@@ -27,7 +28,7 @@ function element(tag, value) {
   return node;
 }
 
-export function renderHexInspector(panel, game, id) {
+export function renderHexInspector(panel, game, id, region) {
   const tile = tiles.get(id);
   panel.hidden = !tile;
   if (!tile) return;
@@ -54,18 +55,23 @@ export function renderHexInspector(panel, game, id) {
     details.append(row);
   }
 
+  add("Region", region ? sideName(region) : "Neutral");
   if (tile.node) {
     const controller = nodeController(game, id);
     const pending = kind === "deposit" && game.claims[id]?.pending;
     add("Control", controller ? `${sideName(controller)}${pending ? " · claim pending" : ""}` : "Unclaimed");
+    const links = specialHexLinks.get(id);
+    if (links.length) add("Territory links", links.map(tileLabel).join(" · "));
     if (kind === "aegis" || kind === "sentinel") {
       add("Shield borders", `${wallsBySource.get(id)?.length ?? 0} linked · ${shieldSourceActive(game, id) ? "Online" : "Offline"}`);
     }
-    if (kind === "nexus" || kind === "vanguard") {
-      add("Nexus shield", baseShieldActive(game, tile.node.home) ? "Online" : "Offline");
+    if (kind === "aegis" || kind === "sentinel" || kind === "vanguard") {
+      add("Activation", game.activatedShields?.[id] ? "Activated" : `${ACTION_COST.shield} TV`);
     }
-    if (kind === "nexus") add("Flank borders", shieldSourceActive(game, id) ? "Online" : "Offline");
-    if (forwardingFrom(game, id)) add("Forward deployment", "Shield offline until the next friendly turn");
+    if (kind === "nexus" || kind === "vanguard") {
+      const linked = vanguards[tile.node.home].reduce((count, source) => count + (wallsBySource.get(source)?.length ?? 0), 0);
+      add("Nexus shield", `${baseShieldActive(game, tile.node.home) ? "Online" : "Offline"} · ${linked} inward borders`);
+    }
   }
   const proxy = game.proxies[id];
   if (proxy) {

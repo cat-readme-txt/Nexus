@@ -242,21 +242,44 @@ details form label { display: block; font-size: .88rem; margin-bottom: .28rem; }
 .team-card { padding: .68rem .74rem; }
 .team-card.active { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); background: #192334; }
 .team-card h3 { font-size: .91rem; color: var(--accent); margin-bottom: .21rem; }
-.team-card strong { font-size: 1.16rem; font-variant-numeric: tabular-nums; }
+.team-resources { display: grid; grid-template-columns: 1fr 1fr; gap: .35rem; }
+.team-resources span { display: block; color: var(--muted); font-size: .73rem; }
+.team-resources strong { font-size: 1.08rem; font-variant-numeric: tabular-nums; }
 .team-card p { font-size: .83rem; margin-top: .15rem; }
 .team-card .team-effects { color: #eed09a; }
 .orders-panel > p { color: var(--muted); font-size: .92rem; margin-block: .38rem .7rem; }
 .command-group, .turn-actions { margin-block: .63rem 0; padding-top: .66rem; border-top: 1px solid var(--line); }
 .command-group h3 { font-size: .8rem; font-weight: 700; margin: 0 0 .45rem; color: var(--muted); }
-.command-hint { color: var(--muted); font-size: .82rem; margin-top: .3rem; }
 .orders-buttons { display: grid; gap: .4rem; }
-.orders-buttons button { display: flex; justify-content: space-between; font-weight: 600; font-size: .9rem; }
+.orders-buttons button { display: flex; width: 100%; justify-content: space-between; font-weight: 600; font-size: .9rem; }
 .orders-buttons button span { opacity: .77; font-variant-numeric: tabular-nums; }
 .orders-buttons button span { white-space: nowrap; }
 .orders-buttons:not(:empty) + .orders-buttons { margin-top: .45rem; }
+.order-control { position: relative; min-width: 0; }
+.order-control:has(> button[hidden]) { display: none; }
+.order-control:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; border-radius: 8px; }
+.order-control button:disabled { pointer-events: none; }
+.order-tooltip {
+  position: absolute;
+  inset-block-end: calc(100% + .22rem);
+  inset-inline-start: 0;
+  z-index: 3;
+  width: 100%;
+  padding: .48rem .57rem;
+  border: 1px solid #6b7f99;
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--text);
+  font-size: .82rem;
+  line-height: 1.35;
+  visibility: hidden;
+  pointer-events: none;
+}
+.order-control:is(:hover, :focus, :has(> button:focus-visible)) > .order-tooltip { visibility: visible; }
 #tile-orders:has(button:not([hidden])) { margin-top: .6rem; }
 .target-actions { display: flex; gap: .42rem; margin-top: .45rem; }
-.target-actions button:first-child { flex: 1; }
+.target-actions .order-control:first-child { flex: 1; }
+.target-actions .order-control:last-child > .order-tooltip { width: 10rem; inset-inline: auto 0; }
 .turn-actions { grid-template-columns: 1fr 1fr; }
 #end-turn { justify-content: center; }
 .log-panel ol {

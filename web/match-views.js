@@ -49,10 +49,12 @@ const metrics = [
   ["TV refunded by Ascension", "tvRefunded"],
   ["Move orders", "moveOrders"],
   ["Move captures", "moveCaptures"],
+  ["Hop captures", "hopCaptures"],
   ["Obelisk shots", "obeliskShots"],
   ["Defensive Strike uses", "defensiveStrikes"],
   ["Reinforcements deployed", "deployed"],
   ["Forward deployments", "forwardDeployed"],
+  ["Shields activated", "shieldsActivated"],
   ["Proxies lost", "lost"],
   ["Enemy Proxies removed", "eliminated"],
   ["Hits absorbed", "hitsAbsorbed"],
@@ -64,7 +66,8 @@ const metrics = [
 
 export function renderReview(game) {
   get("result-title").textContent = `${sideName(game.winner)} wins`;
-  get("result-message").textContent = `${game.result === "nexus" ? "Nexus captured" : "Match conceded"} · ${game.round} ${game.round === 1 ? "round" : "rounds"}`;
+  const result = game.result === "nexus" ? "Nexus captured" : "Match conceded";
+  get("result-message").textContent = `${result} · ${game.round ? `Turn ${game.round}` : "Setup"}`;
   const cards = SIDES.map((side) => {
     const species = speciesById.get(speciesOf(game, side));
     const card = element("article");
@@ -103,7 +106,7 @@ export function renderStats(container, game, final = false) {
   };
 
   const field = allProxies(game);
-  addRow("Turns started", (side) => game.players[side].turns);
+  addRow("Action phases started", (side) => game.players[side].turns);
   addRow("Proxies active", (side) => field.filter((proxy) => proxy.side === side && proxyReady(game, proxy)).length);
   addRow("Proxies in reserve", (side) => game.players[side].reserve + freeReserve(game, side));
   for (const [label, key] of metrics) {

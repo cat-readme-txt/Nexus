@@ -7,11 +7,12 @@ import { renderReview, renderStats, speciesCards } from "./match-views.js";
 import { onlineAvailable, savedOnlineSession, sendOnline } from "./online.js";
 import { PROXY_SKINS, proxySkin } from "./proxy-skins.js";
 import { runTestCommand } from "./terminal.js";
+import { territoryMap } from "./territory.js";
 import {
   ACTION_COST, advanceClock, allProxies, applyAction, augmentBuyError, augmentEffects, augmentStatus,
-  canFireFrom, concedeGame, createGame, defensiveTargets, deploymentCost, fabricationError,
-  forwardActions, freeReserve, hasAugmentDeposit, hopTargets,
-  obeliskFireCost, obeliskRange, placementActions, proxyActions, readyProxy, STARTING_PROXIES, TURN_SECONDS,
+  concedeGame, createGame, defensiveTargets, deploymentCost, fabricationError, forwardActions, freeReserve,
+  hasAugmentDeposit, hopTargets, nodeOrders, obeliskRange, placementActions, proxyMoves, readyProxy,
+  STARTING_PROXIES, TURN_SECONDS, VOID_TV_CAP,
 } from "./rules.js";
 
 const get = (id) => document.getElementById(id);
@@ -52,7 +53,59 @@ const view = createBoardView(get("board"), get("board-viewport"), choose, previe
 const augmentRows = AUGMENTS.map(augmentRow);
 const speciesControls = speciesCards(lockSpecies);
 const targetOrders = ["deploy", "fire", "forward", "phase-jump"];
-const tileOrders = ["occupy", "salvage", "fortify"];
+const tileOrders = ["occupy", "power-shield", "salvage", "fortify"];
+const nodeControls = {
+  occupy: "occupy", "forward-deploy": "forward", salvage: "salvage", fortify: "fortify",
+  fire: "fire", "phase-jump": "phase-jump", "power-shield": "power-shield",
+};
+const orderDescriptions = {
+  deploy: "Place a reserve Proxy on an empty Cradle hex. It activates next turn.",
+  fabricate: "Build one reserve Proxy. Available once every three of your turns with fewer than two active Proxies.",
+  forward: "Deploy one reserve Proxy beside this powered Aegis. You can deploy again when you have a legal hex, reserve and TV.",
+  salvage: "Recover one reserve Proxy and remove this salvage cache.",
+  occupy: "Take control of this generator. Its linked shields go offline until you activate them.",
+  "power-shield": "Power this node’s linked shields. They stay active when your Proxy moves away.",
+  fire: "Show reachable hexes up to two steps away, then choose an enemy Proxy to fire on.",
+  fortify: "Absorb one ranged hit. Armor expires when this Proxy moves or your next turn starts.",
+  "phase-jump": "Jump to an empty hex up to three steps away, ignoring shields. Once per turn.",
+  "confirm-targets": "Apply the selected targets or route.",
+  "cancel-targets": "Discard the current targeting plan.",
+  "augments-button": "View, buy, and activate augments. Buying requires an active Proxy on a Deposit you control.",
+  "end-turn": "Hand off to your opponent. Unspent TV clears. TV already banked by Capacitor Overload carries over.",
+};
+const orderControls = new Map(Object.keys(orderDescriptions).map((id) => {
+  const control = get(id);
+  const wrapper = document.createElement("div");
+  wrapper.className = "order-control";
+  const help = document.createElement("span");
+  help.className = "order-tooltip";
+  help.id = `${id}-help`;
+  help.setAttribute("role", "tooltip");
+  control.before(wrapper);
+  wrapper.append(control, help);
+  control.setAttribute("aria-describedby", help.id);
+  wrapper.addEventListener("click", () => {
+    if (control.disabled) wrapper.focus();
+  });
+  return [id, { control, wrapper, help }];
+}));
+
+function renderOrderControl(id, error, description = orderDescriptions[id]) {
+  const { control, wrapper, help } = orderControls.get(id);
+  control.disabled = !!error;
+  help.textContent = error ? `${description} ${error}` : description;
+  if (error) {
+    wrapper.tabIndex = 0;
+    wrapper.setAttribute("role", "group");
+    wrapper.setAttribute("aria-label", `${control.textContent.trim()}, unavailable`);
+    wrapper.setAttribute("aria-describedby", help.id);
+  } else {
+    wrapper.removeAttribute("tabindex");
+    wrapper.removeAttribute("role");
+    wrapper.removeAttribute("aria-label");
+    wrapper.removeAttribute("aria-describedby");
+  }
+}
 
 function setOrder(next = "move") {
   order = next;
@@ -73,7 +126,7 @@ function previewAction(id, action, inRange) {
   }[action?.type];
   const status = name ? `${tileLabel(id)} · ${name} · ${action.cost} TV${action.refund ? " refunded by Ascension" : ""}`
     : inRange ? `${tileLabel(id)} · Within Obelisk range`
-      : tile ? `${tileLabel(id)} · ${tileName(tile)}` : `Round ${game.round} · ${sideName(game.activeSide)} turn`;
+      : tile ? `${tileLabel(id)} · ${tileName(tile)}` : playTurnTitle();
   text("board-status", status);
 }
 
@@ -138,21 +191,19 @@ function hopLandings(path) {
 }
 
 function legalCommands() {
-  if (!usableTurn()) return { targets: [], options: [], forward: [] };
+  const orders = nodeOrders(game, selected);
+  if (!usableTurn()) return { targets: [], orders };
   if (game.phase === "setup" || order === "deploy") {
-    return { targets: placementActions(game), options: [], forward: [] };
+    return { targets: placementActions(game), orders };
   }
-  if (order === "hop") return { targets: hopLandings(plan), options: [], forward: [] };
+  if (order === "hop") return { targets: hopLandings(plan), orders };
   if (order === "defensive") {
     const targets = defensiveTargets(game, game.activeSide).map((to) => ({ to, type: "defensive-target", cost: 0 }));
-    return { targets, options: [], forward: [] };
+    return { targets, orders };
   }
-  const options = proxyActions(game, selected);
-  const forward = forwardActions(game, selected);
-  const targets = order === "forward" ? forward
-    : options.filter(({ type }) => type === order);
-  if (order === "move") targets.push(...hopLandings());
-  return { targets, options, forward };
+  const targets = order === "move" ? [...proxyMoves(game, selected), ...hopLandings()]
+    : orders.find(({ type }) => nodeControls[type] === order)?.actions ?? [];
+  return { targets, orders };
 }
 
 function showImpactBeforeTransition(next, previousRevision, previousTurn) {
@@ -273,6 +324,11 @@ function afterAction(action) {
   const side = game.activeSide;
   const landing = action.type === "hop" ? action.path.at(-1) : action.to;
   if (landing !== undefined) inspected = landing;
+  if (action.type === "forward-deploy") {
+    selected = action.from;
+    setOrder(forwardActions(game, selected).length ? "forward" : "move");
+    return;
+  }
   if (landing !== undefined && game.proxies[landing]?.side === side) selected = landing;
   else if (action.from !== undefined && game.proxies[action.from]?.side === side) selected = action.from;
   if (action.type === "spawn" && placementActions(game).length) {
@@ -341,10 +397,10 @@ function ordersDescription(hasHopLanding) {
   if (order === "forward") return "Choose a highlighted hex beside the Aegis.";
   if (order === "phase-jump") return "Choose an open landing hex.";
   if (order === "defensive") return `${plan.length} of 3 targets selected. Choose enemy Proxies in your territory.`;
-  if (order === "hop") return "Choose another landing or confirm the hop. Select the last landing to undo it.";
-  if (game.players[game.activeSide].tv === 0) return "Select a Proxy on an Aegis to capture it for free, or end your turn.";
+  if (order === "hop") return "Choose another landing or confirm. The hop captures any enemies you jump over. Select the last landing to undo it.";
+  if (game.players[game.activeSide].tv === 0) return "You have 0 TV. Choose an available free order or end your turn.";
   if (selected !== null && game.proxies[selected]?.side === game.activeSide) {
-    if (hasHopLanding) return "Choose a Move destination or a highlighted Hop landing.";
+    if (hasHopLanding) return "Choose a Move destination or a highlighted Hop landing. Hopping over an enemy captures it.";
     return readyProxy(game, selected) ? "Choose a highlighted hex to move. Moving onto an enemy Proxy captures it."
       : "This Proxy can act starting on your next turn.";
   }
@@ -410,7 +466,7 @@ function renderAugments() {
     const canUse = state === "ready" && (id !== "defensive" || defensiveTargets(game, side).length > 0);
     control.disabled = !acting || !(canUse || (state === "available" && !buyError));
     control.textContent = {
-      available: id === "void" ? "Invoke · 0 TV" : `Buy · ${price} TV`,
+      available: id === "void" ? "Invoke · 0 TV" : `${id === "overload" ? "Bank TV" : "Buy"} · ${price} TV`,
       ready: id === "defensive" ? "Choose targets" : "Activate",
       used: "Spent", active: "Active", locked: "Locked",
     }[state];
@@ -418,10 +474,14 @@ function renderAugments() {
     control.setAttribute("aria-label", `${augment.name}, ${control.textContent}`);
   }
   text("augment-count", ready ? `${ready} ready` : "");
-  const status = player.augments?.void ? "The Call of Void is active. Your capacitor is capped at 20 TV."
+  const status = player.augments?.void ? `The Call of Void is active. Deployments cost 0 TV. Your recharge cap is ${VOID_TV_CAP} TV.`
     : deposit ? "Deposit staffed. Each augment can be bought once in this match."
       : "Staff a claimed Deposit with an active Proxy to buy augments.";
   text("augment-status", `${sideName(side)} · ${player.tv} TV. ${status}`);
+}
+
+function playTurnTitle() {
+  return `Turn ${game.round} · ${sideName(game.activeSide)} to act`;
 }
 
 function renderMatch() {
@@ -429,11 +489,11 @@ function renderMatch() {
   const setup = game.phase === "setup";
   const finished = game.phase === "finished";
   const handoff = screen === "local" && game.deadline === null && !finished;
-  const turnTitle = finished ? "Match complete" : setup ? `${active} setup` : `${active} turn`;
+  const turnTitle = finished ? "Match complete" : setup ? `${active} setup` : playTurnTitle();
   const revealHandoff = handoff && impactTransition === null;
   const newlyVisibleHandoff = revealHandoff && get("handoff").hidden;
 
-  text("board-status", setup || finished ? turnTitle : `Round ${game.round} · ${turnTitle}`);
+  text("board-status", turnTitle);
   text("turn-heading", turnTitle);
   get("turn-panel").dataset.side = finished ? game.winner : game.activeSide;
   text("seat-label", screen === "local" ? "Pass and play" : `You are ${sideName(seat)}`);
@@ -454,7 +514,8 @@ function renderMatch() {
     get(`${side}-team`).classList.toggle("active", !finished && game.activeSide === side);
     text(`${side}-energy`, `${player.tv} TV`);
     const free = freeReserve(game, side);
-    text(`${side}-proxies`, `${deployed} fielded · ${player.reserve + free} reserve${free ? ` (${free} free)` : ""}`);
+    text(`${side}-reserve`, player.reserve + free);
+    text(`${side}-proxies`, `${deployed} fielded`);
     const effects = augmentEffects(game, side);
     text(`${side}-effects`, effects.join(" · "));
     hide(`${side}-effects`, !effects.length);
@@ -462,40 +523,43 @@ function renderMatch() {
 
   const canOrder = usableTurn() && !setup;
   const showOrders = !setup && !finished && !handoff && (screen === "local" || game.activeSide === seat);
-  const { targets, options, forward } = legalCommands();
+  const { targets, orders } = legalCommands();
   const hasHopLanding = targets.some(({ type }) => type === "hop-target");
   text("orders-description", ordersDescription(hasHopLanding));
-  const available = (type) => options.find((action) => action.type === type);
-  const fireAvailable = showOrders && canFireFrom(game, selected);
-  const firingRange = fireAvailable && order === "fire" ? obeliskRange(game, selected).map(({ to }) => to) : [];
-  for (const type of [...tileOrders, "phase-jump"]) {
-    hide(type, !available(type));
+  const turnError = canOrder ? null : "Available on your play turn.";
+  const orderError = turnError ?? (targeting() ? "Confirm or cancel the current plan first." : null);
+  const nodeType = tiles.get(selected)?.node?.type;
+  const deposit = nodeType === "deposit";
+  text("occupy-label", deposit ? "Occupy" : "Capture");
+  for (const [type, id] of Object.entries(nodeControls)) {
+    const command = orders.find((order) => order.type === type);
+    hide(id, !showOrders || !command);
+    if (!command || !showOrders) continue;
+    text(`${id}-cost`, `${command.cost} TV`);
+    let description;
+    if (type === "occupy" && deposit) description = "Claim this Deposit and gain a reserve Proxy. Staff it at the start of your next turn to secure the claim.";
+    if (type === "power-shield" && nodeType === "vanguard") {
+      description = "Arm the Nexus shield. It needs an active Proxy here and an online home Aegis or Obelisk.";
+    }
+    renderOrderControl(id, orderError ?? command.error, description);
   }
-  hide("fire", !fireAvailable);
-  const fireCost = obeliskFireCost(game, game.activeSide);
-  button("fire", !canOrder || game.players[game.activeSide].tv < fireCost);
-  text("fire-cost", `${fireCost} TV`);
-  hide("range-key", !fireAvailable || order !== "fire");
+  const showRange = showOrders && order === "fire";
+  const firingRange = showRange ? obeliskRange(game, selected).map(({ to }) => to) : [];
+  hide("range-key", !showRange);
   hide("hop-key", !hasHopLanding);
-  hide("linked-shield-key", !wallsBySource.has(inspected));
-  hide("forward", !forward.length);
-  const claim = available("occupy");
-  text("occupy-label", claim && tiles.get(claim.to).node.type !== "deposit" ? "Capture" : "Occupy");
-  text("occupy-cost", claim ? `${claim.cost} TV` : "");
-  text("forward-cost", forward.length ? `${forward[0].cost} TV` : "");
+  hide("linked-shield-key", !wallsBySource.has(inspected) && tiles.get(inspected)?.node?.type !== "nexus");
   hide("reinforcements", !showOrders);
-  const deployments = canOrder && !targeting() ? placementActions(game) : [];
-  button("deploy", deployments.length === 0);
   text("deploy-cost", `${deploymentCost(game, game.activeSide)} TV`);
-  const blockedFabrication = canOrder && !targeting() ? fabricationError(game, game.activeSide) : null;
-  button("fabricate", !canOrder || targeting() || !!blockedFabrication);
-  text("fabrication-hint", blockedFabrication ?? "");
-  hide("fabrication-hint", !blockedFabrication);
+  renderOrderControl("deploy", orderError ?? (placementActions(game).length ? null : "Requires a reserve Proxy, enough TV, and an empty Cradle hex."));
+  renderOrderControl("fabricate", orderError ?? fabricationError(game, game.activeSide));
   hide("turn-actions", setup || finished || handoff);
   hide("target-actions", !targeting());
-  text("confirm-targets", order === "hop" ? "Confirm hop · 1 TV" : "Use Defensive Strike");
-  button("confirm-targets", !canOrder || plan.length === 0);
-  button("end-turn", !canOrder);
+  text("confirm-targets", order === "hop" ? `Confirm hop · ${ACTION_COST.move} TV` : "Use Defensive Strike");
+  renderOrderControl("confirm-targets", turnError ?? (plan.length ? null : "Choose a target or landing hex first."),
+    order === "hop" ? "Commit the route and capture enemies you jump over." : "Strike each selected enemy Proxy in your territory.");
+  renderOrderControl("cancel-targets", null);
+  renderOrderControl("augments-button", null);
+  renderOrderControl("end-turn", turnError);
   for (const id of targetOrders) {
     get(id).setAttribute("aria-pressed", order === id);
   }
@@ -505,10 +569,11 @@ function renderMatch() {
     return item;
   }));
   renderAugments();
-  renderHexInspector(get("hex-inspector"), game, inspected);
+  const regions = territoryMap(game);
+  renderHexInspector(get("hex-inspector"), game, inspected, regions.get(inspected));
   if (get("live-stats").open) renderStats(get("live-stats-table"), game);
   view.render(game, { selected, inspect: inspected, actions: targets,
-    planned: plan, mode: order, firingRange, playerSkins: screen === "online" ? onlineSkins : localSkins });
+    planned: plan, mode: order, firingRange, regions, playerSkins: screen === "online" ? onlineSkins : localSkins });
   renderClock();
 }
 
@@ -717,7 +782,7 @@ for (const id of targetOrders) {
 }
 for (const type of tileOrders) {
   get(type).addEventListener("click", () => {
-    const action = legalCommands().options.find((candidate) => candidate.type === type);
+    const action = legalCommands().orders.find((candidate) => candidate.type === type)?.actions[0];
     if (action) sendAction(action);
   });
 }

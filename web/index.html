@@ -155,13 +155,19 @@
         <div class="team-grid" aria-label="Resources">
           <section class="panel team-card" data-side="blue" id="blue-team">
             <h3>Blue</h3>
-            <strong id="blue-energy"></strong>
+            <div class="team-resources">
+              <div><span>Energy</span><strong id="blue-energy"></strong></div>
+              <div><span>Reserve</span><strong id="blue-reserve"></strong></div>
+            </div>
             <p id="blue-proxies" class="muted"></p>
             <p id="blue-effects" class="team-effects" hidden></p>
           </section>
           <section class="panel team-card" data-side="red" id="red-team">
             <h3>Red</h3>
-            <strong id="red-energy"></strong>
+            <div class="team-resources">
+              <div><span>Energy</span><strong id="red-energy"></strong></div>
+              <div><span>Reserve</span><strong id="red-reserve"></strong></div>
+            </div>
             <p id="red-proxies" class="muted"></p>
             <p id="red-effects" class="team-effects" hidden></p>
           </section>
@@ -174,17 +180,17 @@
             <h3>Reinforcements</h3>
             <div class="orders-buttons">
               <button type="button" id="deploy" aria-pressed="false">Deploy in Cradle <span id="deploy-cost"></span></button>
-              <button type="button" id="fabricate" aria-describedby="fabrication-hint">Fabricate reserve <span>2 TV</span></button>
+              <button type="button" id="fabricate">Fabricate reserve <span>2 TV</span></button>
               <button type="button" id="forward" aria-pressed="false" hidden>Forward deploy <span id="forward-cost"></span></button>
-              <button type="button" id="salvage" hidden>Recover cache <span>2 TV</span></button>
+              <button type="button" id="salvage" hidden>Recover cache <span id="salvage-cost"></span></button>
             </div>
-            <p class="command-hint" id="fabrication-hint" hidden></p>
           </div>
           <div class="orders-buttons" id="tile-orders">
             <button type="button" id="occupy" hidden><strong id="occupy-label">Occupy</strong> <span id="occupy-cost"></span></button>
+            <button type="button" id="power-shield" hidden>Activate shield <span id="power-shield-cost"></span></button>
             <button type="button" id="fire" aria-pressed="false" hidden>Obelisk fire <span id="fire-cost">1 TV</span></button>
-            <button type="button" id="fortify" hidden>Fortify <span>2 TV</span></button>
-            <button type="button" id="phase-jump" aria-pressed="false" hidden>Phase jump <span>2 TV</span></button>
+            <button type="button" id="fortify" hidden>Fortify <span id="fortify-cost"></span></button>
+            <button type="button" id="phase-jump" aria-pressed="false" hidden>Phase jump <span id="phase-jump-cost"></span></button>
           </div>
           <div class="target-actions orders-buttons" id="target-actions" hidden>
             <button type="button" id="confirm-targets" class="primary"></button>
@@ -260,26 +266,27 @@
         <summary>Background</summary>
         <p>Humanity depends on AI when it discovers hostile powers beyond Earth. With little intelligence and no agreement on how to respond, the world's governments turn their supercomputers over to their most advanced AI. It simulates possible wars, including conflicts between the alien powers. Each match is one of those simulations.</p>
       </details>
-      <p><strong>TV stands for teravolts.</strong> TV is the game's energy budget for orders. Base recharge is 3 TV plus 1 TV per active Proxy, up to 30 TV. Spend TV before the three-minute turn ends. Unused TV is lost.</p>
+      <p><strong>TV stands for teravolts.</strong> Recharge 3 TV plus 1 TV per active Proxy, up to 40 TV or 20 TV with The Call of Void. Each side has three minutes to act. The turn number advances after both sides finish.</p>
       <dl class="rule-actions">
         <div><dt>Move · 1 TV</dt><dd>Enter an adjacent hex. Landing on an enemy Proxy removes it immediately and earns one reserve Proxy. Enemy shields and your own Proxies block movement.</dd></div>
-        <div><dt>Deploy · base cost 1 TV</dt><dd>Place a reserve Proxy on a free hex in your Cradle. It can act, power nodes, and generate TV starting on your next turn.</dd></div>
+        <div><dt>Deploy · base cost 1 TV</dt><dd>Place a reserve Proxy on any empty Cradle hex, including Obelisks. It activates next turn. The Call of Void makes all deployments free.</dd></div>
       </dl>
       <dl class="rule-nodes">
         <div><img src="./assets/nexus.png" alt=""><div><dt>Nexus</dt><dd>Enter the enemy Nexus to win.</dd></div></div>
-        <div><img src="./assets/vanguard.png" alt=""><div><dt>Vanguard</dt><dd>A friendly Proxy powers the Nexus shield from here. It falls if the enemy controls all eight of your Obelisks.</dd></div></div>
-        <div><img src="./assets/sentinel.png" alt=""><div><dt>Sentinel Obelisk</dt><dd>Stand on it and select Capture for 3 TV (4 for Veyari) to shut down its borders or restore your own. Obelisk fire costs 1 TV (2 for Directorate) and reaches up to two hexes.</dd></div></div>
-        <div><img src="./assets/aegis.png" alt=""><div><dt>Aegis</dt><dd>Stand on it and select Capture for 0 TV to shut down its borders or restore your own.</dd></div></div>
+        <div><img src="./assets/vanguard.png" alt=""><div><dt>Vanguard</dt><dd>Pay 2 TV to arm the Nexus shield from here. Keep an active Proxy on an armed Vanguard and at least one home Aegis or Obelisk online and clear of enemies.</dd></div></div>
+        <div><img src="./assets/sentinel.png" alt=""><div><dt>Sentinel Obelisk</dt><dd>Capture for 3 TV (4 for Veyari). A Proxy on a controlled home Obelisk can fire up to two hexes away for 1 TV (2 for Directorate).</dd></div></div>
+        <div><img src="./assets/aegis.png" alt=""><div><dt>Aegis</dt><dd>Capture for 0 TV. A powered Aegis you control can deploy Proxies with the Forward Deployment augment.</dd></div></div>
         <div><img src="./assets/deposit.png" alt=""><div><dt>Deposit</dt><dd>Occupy for 3 TV to add one Proxy to your reserve.</dd></div></div>
       </dl>
       <p>Occupied special hexes show an inlay around the Proxy. Look for a crown on a Nexus, side brackets on a Vanguard, pointed chevrons on an Obelisk, flat bars on an Aegis, a gold ring on a Deposit, or a teal diamond on a cache. Select any hex to see its rules and occupants.</p>
-      <p>Fabricate a reserve Proxy for 2 TV with fewer than two active Proxies, once every three turns. Salvage caches surface in Turbulence every third round. An active Proxy can recover one for 2 TV.</p>
-      <p>Aegis and Obelisk borders start powered. Some arcs cover three neighboring hexes and wider arcs cover four. Capture shuts down the entire linked arc until the original side recaptures its generator. Solid borders are powered. Dashed borders mark where offline shields will return. Select a generator to outline its linked borders.</p>
+      <p>Fabricate a reserve Proxy for 2 TV with fewer than two active Proxies, once every three turns. Salvage caches surface in Turbulence every third turn. An active Proxy can recover one for 2 TV.</p>
+      <p>All shields start offline. Select an active Proxy on a generator you control and pay 2 TV to activate its shield. Aegis and Obelisk shields stay active when your Proxy leaves. Capturing the generator resets its shield. Solid borders are powered. Dashed borders show offline shields.</p>
       <p>A solid gold ring around a Nexus marks its active Vanguard shield. A small gold hexagon around a Proxy marks Keth armor, which absorbs one Obelisk or Defensive Strike hit.</p>
-      <p>A staffed Aegis can deploy a reserve Proxy to an open neighboring hex for 1 TV. Its shields drop until your next turn. Keep a Proxy on a newly occupied Deposit until your next turn to secure control.</p>
+      <p>Buy <strong>Forward Deployment</strong> for 5 TV. An active Proxy on a powered Aegis can deploy to any legal empty neighbor for 1 TV and one reserve. It can deploy repeatedly from the same Aegis.</p>
+      <p>Capturing a special hex linked to your territory claims its one-hex ring and connects it to your nearest existing region. Turbulence Deposits link the frontiers. Inspect a node to see its links. Keep a Proxy on a claimed Deposit until your next turn to secure it.</p>
       <p>Species abilities are explained when you choose. Board effects are visible, and the match review reveals both picks.</p>
       <p>Hold a Deposit with an active Proxy to buy augments. Use a purchased augment on one of your turns, even if you later lose the Deposit.</p>
-      <p>Buying Hop unlocks it for the match. Select an active Proxy and look for violet diamonds. Pick one or more landings, then confirm the entire chain for 1 TV.</p>
+      <p>Buying Hop unlocks it for the match. Select an active Proxy and look for violet diamonds. Pick one or more landings, then confirm the entire chain for 1 TV. Each enemy Proxy you jump over is captured.</p>
       <p class="muted">Use Q, W, E, A, S, and D to move around the board with a keyboard. Enter selects a hex.</p>
     </div>
   </dialog>

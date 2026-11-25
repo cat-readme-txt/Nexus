@@ -3,7 +3,7 @@ import test from "node:test";
 import { board, cradles, edgeKey, nexus, nodes, otherSide, sentinels, tileLabel, tiles, vanguards, walls, wallsBySource } from "../web/board.js";
 import {
   advanceClock, applyAction, baseShieldActive, createGame, nodeController, placementActions,
-  obeliskRange, proxyActions, readyProxy, TURN_SECONDS, wallActive,
+  nodeOrders, obeliskRange, proxyActions, readyProxy, TURN_SECONDS, wallActive,
 } from "../web/rules.js";
 
 const cost = (type, from, to) => ({ type, from, to });
@@ -25,8 +25,8 @@ function proxy(game, id, side) {
 
 test("the competition layout preserves playable hexes, nodes, and adjacent shields", () => {
   assert.equal(board.length, 337);
-  assert.equal(cradles.blue.length, 23);
-  assert.equal(cradles.red.length, 22);
+  assert.equal(cradles.blue.length, 25);
+  assert.equal(cradles.red.length, 25);
   assert.equal(nodes.filter(({ node }) => node.type === "deposit").length, 9);
   assert.deepEqual([sentinels.blue.length, sentinels.red.length], [8, 8]);
   assert.equal(walls.length, 251);
@@ -40,7 +40,7 @@ test("the competition layout preserves playable hexes, nodes, and adjacent shiel
   for (const wall of walls) {
     assert(tiles.get(wall.from).neighbors.includes(wall.to));
     assert.equal(tiles.get(wall.source).node.home, wall.side);
-    assert(wallActive(game, wall));
+    assert(!wallActive(game, wall));
   }
 });
 
@@ -63,6 +63,7 @@ test("capturing a wide generator shuts down all four hexes of its printed arc", 
     const hexes = new Set(arc.flatMap(({ from, to }) => [from, to]).filter((id) => neighbors.includes(id)).map(tileLabel));
     assert.deepEqual([...hexes].sort(), [...expectedHexes].sort(), tileLabel(source));
     assert.equal(arc.length, expectedBorders, tileLabel(source));
+    game.activatedShields[source] = node.home;
     assert(arc.every((wall) => wallActive(game, wall)));
 
     const attacker = otherSide(node.home);
@@ -71,7 +72,6 @@ test("capturing a wide generator shuts down all four hexes of its printed arc", 
     proxy(game, source, attacker);
     assert.equal(applyAction(game, attacker, cost("occupy", source, source), start), null);
     assert(arc.every((wall) => !wallActive(game, wall)), tileLabel(source));
-    assert(walls.every((wall) => wall.source === source || wallActive(game, wall)));
   }
 });
 
@@ -81,6 +81,7 @@ test("a fourth-hex return opens to enemy movement and closes after recapture", (
   const inner = 30; // F2
   const outer = 31; // G2
   const edge = walls.find(({ from, to }) => from === inner && to === outer);
+  game.activatedShields[generator] = "blue";
   game.activeSide = "red";
   game.players.red.tv = 6;
   proxy(game, generator, "red");
@@ -92,9 +93,12 @@ test("a fourth-hex return opens to enemy movement and closes after recapture", (
   assert.equal(applyAction(game, "red", cost("move", outer, inner), start), null);
   assert.equal(applyAction(game, "red", cost("move", generator, 5), start), null);
   assert(!wallActive(game, edge));
-  assert.equal(applyAction(game, "red", { type: "end" }, start), null);
   proxy(game, generator, "blue");
+  proxy(game, 9, "blue");
+  assert.equal(applyAction(game, "red", { type: "end" }, start), null);
   assert.equal(applyAction(game, "blue", cost("occupy", generator, generator), start), null);
+  assert(!wallActive(game, edge));
+  assert.equal(applyAction(game, "blue", cost("power-shield", generator, generator), start), null);
   assert(wallActive(game, edge));
 });
 
@@ -123,6 +127,11 @@ test("a local match hands off setup and gives Blue the first fueled turn", () =>
   assert.equal(advanceClock(game, start + 2 * turnMs), false);
   assert.equal(applyAction(game, "blue", { type: "ready" }, start + 2 * turnMs), null);
   assert.equal(game.deadline, start + 3 * turnMs);
+  assert.equal(applyAction(game, "blue", { type: "end" }, start + 2 * turnMs), null);
+  assert.equal(game.round, 1);
+  assert.equal(applyAction(game, "red", { type: "ready" }, start + 2 * turnMs), null);
+  assert.equal(applyAction(game, "red", { type: "end" }, start + 2 * turnMs), null);
+  assert.equal(game.round, 2);
 });
 
 test("timeouts complete setup, expire turns and reject actions at the deadline", () => {
@@ -197,6 +206,8 @@ test("an Aegis capture shuts down only its forward borders and persists until re
   const homeward = walls.find(({ from, to }) => from === aegis && to === 151);
   assert(outward.length > 0);
   assert.equal(homeward.source, 176);
+  game.activatedShields[aegis] = "red";
+  game.activatedShields[homeward.source] = "red";
 
   proxy(game, from, "blue");
   assert.equal(applyAction(game, "blue", cost("move", from, aegis), start), null);
@@ -220,6 +231,8 @@ test("an Aegis capture shuts down only its forward borders and persists until re
   assert(outward.every((wall) => !wallActive(game, wall)));
   assert.equal(applyAction(game, "red", cost("occupy", aegis, aegis), start), null);
   assert.equal(nodeController(game, aegis), "red");
+  assert(outward.every((wall) => !wallActive(game, wall)));
+  assert.equal(applyAction(game, "red", cost("power-shield", aegis, aegis), start), null);
   assert(outward.every((wall) => wallActive(game, wall)));
   assert(wallActive(game, homeward));
 });
@@ -242,6 +255,7 @@ test("Obelisk occupation has a TV cost and remains captured after departure", ()
   const obelisk = sentinels.red[0];
   const from = 51;
   const wall = walls.find(({ source }) => source === obelisk);
+  game.activatedShields[obelisk] = "red";
   proxy(game, from, "blue");
   assert.equal(applyAction(game, "blue", cost("move", from, obelisk), start), null);
   assert(wallActive(game, wall));
@@ -269,10 +283,16 @@ test("a Deposit costs 3 TV and grants a reserve even if the claim is denied", ()
   assert.equal(game.players.blue.reserve, 1);
 });
 
-test("a reserve Proxy deploys only at its own Cradle and powers up next turn", () => {
+test("all own Cradle hexes can spawn Proxies, including its Obelisks, and the units activate next turn", () => {
+  const setup = createGame({ now: start, selectSpecies: false });
+  for (const side of ["blue", "red"]) {
+    setup.activeSide = side;
+    assert.deepEqual(placementActions(setup).map(({ to }) => to), cradles[side]);
+    assert.equal(cradles[side].filter((id) => tiles.get(id).node?.type === "sentinel").length, 3);
+  }
   const game = playGame();
   game.players.blue.reserve = 1;
-  const to = vanguards.blue[0];
+  const to = 71;
   assert(!placementActions(game).some((action) => cradles.red.includes(action.to)));
   assert.equal(applyAction(game, "blue", { type: "spawn", to }, start), null);
   assert.equal(game.players.blue.reserve, 0);
@@ -282,7 +302,64 @@ test("a reserve Proxy deploys only at its own Cradle and powers up next turn", (
   assert.equal(applyAction(game, "red", { type: "end" }, start), null);
   assert.equal(readyProxy(game, to), true);
   assert.equal(game.players.blue.tv, 4);
-  assert.equal(baseShieldActive(game, "blue"), true);
+  assert.equal(baseShieldActive(game, "blue"), false);
+});
+
+test("Vanguard activation costs 2 TV and needs active staff and outside power", () => {
+  const game = playGame();
+  const vanguard = vanguards.blue[0];
+  const support = 8;
+  const inward = wallsBySource.get(vanguard)[0];
+  const shield = wallsBySource.get(support)[0];
+  proxy(game, vanguard, "blue");
+  proxy(game, support, "blue");
+  game.players.blue.tv = 1;
+  assert.match(nodeOrders(game, vanguard).find(({ type }) => type === "power-shield").error, /Needs 2 TV/);
+  assert.match(applyAction(game, "blue", cost("power-shield", vanguard, vanguard), start), /unavailable/);
+  game.players.blue.tv = 12;
+  game.proxies[vanguard].readyOn = 2;
+  assert.match(applyAction(game, "blue", cost("power-shield", vanguard, vanguard), start), /unavailable/);
+  game.proxies[vanguard].readyOn = 0;
+  assert.equal(applyAction(game, "blue", cost("power-shield", vanguard, vanguard), start), null);
+  assert.equal(game.players.blue.tv, 10);
+  assert(!wallActive(game, inward));
+  assert.equal(applyAction(game, "blue", cost("power-shield", support, support), start), null);
+  assert.equal(game.players.blue.tv, 8);
+  assert(wallActive(game, shield));
+  assert(wallActive(game, inward));
+  assert.equal(applyAction(game, "blue", cost("move", support, 9), start), null);
+  assert(wallActive(game, shield));
+  assert(baseShieldActive(game, "blue"));
+  assert.equal(applyAction(game, "blue", cost("move", vanguard, 23), start), null);
+  assert(!baseShieldActive(game, "blue"));
+  assert.equal(applyAction(game, "blue", cost("move", 23, vanguard), start), null);
+  assert(baseShieldActive(game, "blue"));
+});
+
+test("the three Cradle Obelisks cannot switch off Vanguard borders while another home generator provides power", () => {
+  for (const side of ["blue", "red"]) {
+    const game = playGame();
+    const opponent = otherSide(side);
+    game.activeSide = opponent;
+    game.players[opponent].tv = 20;
+    const vanguard = vanguards[side][0];
+    const support = nodes.find(({ node }) => node.home === side && node.type === "aegis").id;
+    const obelisks = cradles[side].filter((id) => tiles.get(id).node?.type === "sentinel");
+    const inward = vanguards[side].flatMap((id) => wallsBySource.get(id));
+    assert(inward.length > 6);
+    assert(inward.every(({ from, to }) => cradles[side].includes(from) && cradles[side].includes(to)));
+    proxy(game, vanguard, side);
+    for (const id of [vanguard, support, ...obelisks]) game.activatedShields[id] = side;
+    for (const id of obelisks) {
+      proxy(game, id, opponent);
+      assert.equal(applyAction(game, opponent, cost("occupy", id, id), start), null);
+      assert(wallsBySource.get(id).every((wall) => !wallActive(game, wall)));
+      assert(inward.every((wall) => wallActive(game, wall)));
+    }
+    proxy(game, support, opponent);
+    assert(!baseShieldActive(game, side));
+    assert(inward.every((wall) => !wallActive(game, wall)));
+  }
 });
 
 test("an Obelisk can fire at a reachable enemy up to two steps away without moving", () => {
@@ -305,7 +382,8 @@ test("an Obelisk can fire at a reachable enemy up to two steps away without movi
 
 test("enemy shields block movement and the Nexus is reachable after its Vanguard shield drops", () => {
   const game = playGame();
-  const wall = walls.find((edge) => edge.side === "red" && wallActive(game, edge));
+  const wall = walls.find(({ source, side }) => side === "red" && tiles.get(source).node.type === "sentinel");
+  game.activatedShields[wall.source] = "red";
   proxy(game, wall.from, "blue");
   proxy(game, wall.to, "red");
   assert.equal(applyAction(game, "blue", cost("move", wall.from, wall.to), start), "That action is unavailable.");
@@ -316,6 +394,7 @@ test("enemy shields block movement and the Nexus is reachable after its Vanguard
   proxy(game, from, "blue");
   proxy(game, target, "red");
   proxy(game, vanguards.red[0], "red");
+  game.activatedShields[vanguards.red[0]] = "red";
   assert.equal(baseShieldActive(game, "red"), true);
   assert.equal(applyAction(game, "blue", cost("move", from, target), start), "That action is unavailable.");
   for (const id of sentinels.red) game.claims[id] = { held: "blue", pending: null };
