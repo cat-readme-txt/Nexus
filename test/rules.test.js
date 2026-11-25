@@ -164,7 +164,7 @@ test("timeouts complete setup, expire turns and reject actions at the deadline",
   assert.equal(game.players.red.tv, 6);
 });
 
-test("one Move captures an enemy for exactly 1 TV, including a fortified enemy", () => {
+test("a fortified enemy blocks Move, and capturing an unprotected enemy costs exactly 1 TV", () => {
   const game = playGame();
   const from = 162;
   const to = 163;
@@ -177,6 +177,10 @@ test("one Move captures an enemy for exactly 1 TV, including a fortified enemy",
   game.players.blue.tv = 0;
   assert.equal(applyAction(game, "blue", cost("move", from, to), start), "That action is unavailable.");
   game.players.blue.tv = 1;
+  assert.equal(applyAction(game, "blue", cost("move", from, to), start), "That action is unavailable.");
+  assert.equal(game.proxies[to].fortified, true);
+  assert.equal(game.players.blue.tv, 1);
+  delete game.proxies[to].fortified;
   assert.equal(applyAction(game, "blue", cost("strike", from, to), start), "That action is unavailable.");
   assert.equal(applyAction(game, "blue", cost("withdraw", from, to), start), "That action is unavailable.");
   assert.equal(applyAction(game, "blue", cost("move", from, to), start), null);
@@ -473,7 +477,9 @@ test("a Vanguard fires up to three steps for 2 TV even with its shield offline",
   assert.equal(game.stats.red.hitsAbsorbed, 1);
   assert.equal(game.proxies[to].side, "red");
   assert.equal(applyAction(game, "blue", shot, start), null);
-  assert.equal(game.proxies[to], undefined);
+  assert.equal(game.proxies[to].side, "red");
+  assert.equal(game.proxies[to].fortified, true);
+  assert.equal(game.stats.red.hitsAbsorbed, 2);
   assert.equal(game.proxies[from].side, "blue");
   assert.equal(game.stats.blue.vanguardShots, 2);
   assert.equal(game.stats.blue.obeliskShots, undefined);

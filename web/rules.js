@@ -1,4 +1,4 @@
-import { AUGMENT_BY_ID } from "./augments.js";
+import { ASCENSION_STAGES, AUGMENT_BY_ID } from "./augments.js";
 import { speciesById, speciesOf } from "./species.js";
 import { nodeController, shieldActivation, territoryMap } from "./territory.js";
 import {
@@ -11,6 +11,7 @@ export { nodeController };
 export const TURN_SECONDS = 180;
 export const MAX_TV = 40;
 export const VOID_TV_CAP = 20;
+const ASCENDED_DIRECTORATE_TV_CAP = 50;
 export const STARTING_PROXIES = 3;
 export const ACTION_COST = {
   move: 1, spawn: 1, occupy: 3, fire: 1, vanguardFire: 2, fabricate: 2, phase: 2, fortify: 2, shield: 2,
@@ -24,6 +25,7 @@ const DEPOSITS = nodes.filter(({ node }) => node.type === "deposit").map(({ id }
 const FIELD_GENERATORS = Object.fromEntries(SIDES.map((side) => [side, nodes
   .filter(({ node }) => node.home === side && isFieldGenerator(node)).map(({ id }) => id)]));
 const VOID_REINFORCEMENTS = 30;
+const VOID_INVOCATION_TV = 10;
 const ACTION_SOUNDS = {
   place: "place", spawn: "deploy", "forward-deploy": "deploy", fabricate: "fabricate",
   fortify: "fortify", fire: "fire", "phase-jump": "phase-jump",
@@ -231,7 +233,6 @@ function claimNode(game, id, side) {
 
 function transferProxy(game, from, to) {
   const proxy = game.proxies[from];
-  delete proxy.fortified;
   delete game.proxies[from];
   game.proxies[to] = proxy;
   collectCache(game, to, proxy.side);
@@ -244,7 +245,8 @@ export function freeReserve(game, side) {
 
 function place(game, id, side, starting) {
   const player = game.players[side];
-  game.proxies[id] = { side, readyOn: player.turns + 1 };
+  const readyOn = player.augments?.void ? player.turns : player.turns + 1;
+  game.proxies[id] = { side, readyOn };
   if (starting) player.placed += 1;
   else {
     if (freeReserve(game, side)) player.augments.freeProxies -= 1;
@@ -326,14 +328,18 @@ function nextTurn(game, now) {
   for (const [id, proxy] of Object.entries(game.proxies)) {
     if (proxy.side !== side) continue;
     delete proxy.fortified;
+    delete proxy.ascensionFortification;
     if (readyProxy(game, id)) activated += 1;
   }
-  const supplied = speciesOf(game, side) === "directorate" && hasAugmentDeposit(game, side);
+  const directorate = speciesOf(game, side) === "directorate";
+  const supplied = directorate && hasAugmentDeposit(game, side);
   if (supplied) {
     addReserve(game, side);
     record(game, side, "speciesPowers");
   }
-  player.tv = Math.min(player.augments?.void ? VOID_TV_CAP : MAX_TV, 3 + activated + (supplied ? 3 : 0));
+  const rechargeCap = player.augments?.void ? VOID_TV_CAP
+    : directorate && hasFinalAscension(game, side) ? ASCENDED_DIRECTORATE_TV_CAP : MAX_TV;
+  player.tv = Math.min(rechargeCap, 3 + activated + (supplied ? 3 : 0));
   record(game, side, "tvEarned", player.tv);
   player.tv += player.augments?.bankedTV ?? 0;
   if (player.augments?.bankedTV) player.augments.bankedTV = 0;
@@ -386,7 +392,8 @@ export function advanceClock(game, now = Date.now()) {
 
 export function deploymentCost(game, side, forward = false) {
   if (game.players[side].augments?.void || freeReserve(game, side)) return 0;
-  return ACTION_COST.spawn + (!forward && speciesOf(game, side) === "keth" ? 1 : 0);
+  const surcharge = !forward && speciesOf(game, side) === "keth" && !hasFinalAscension(game, side);
+  return ACTION_COST.spawn + (surcharge ? 1 : 0);
 }
 
 function hasReserve(game, side) {
@@ -447,7 +454,9 @@ function reachableTiles(game, from, side, distance, fire = false) {
         const enterable = mayEnter(side, to);
         if (!enterable && !(fire && occupied?.side === otherSide(side))) continue;
         reached.add(to);
-        if (occupied?.side !== side) destinations.push({ to, occupied, steps: step });
+        if (occupied?.side !== side && (fire || !occupied?.fortified)) {
+          destinations.push({ to, occupied, steps: step });
+        }
         if (!occupied) next.push(to);
       }
     }
@@ -461,12 +470,22 @@ function activeProxyTurn(game, from) {
     && game.proxies[from]?.side === game.activeSide && readyProxy(game, from);
 }
 
-function ascensionActive(game, side, from) {
-  return game.players[side].augments?.inventory.ascension === "active" && territoryMap(game).has(from);
+export function ascensionProgress(game, side) {
+  if (augmentStatus(game, side, "ascension") !== "active") return null;
+  const player = game.players[side];
+  const tier = ASCENSION_STAGES.findLastIndex(({ turn }) => player.turns >= turn);
+  const startedOn = player.augments.ascensionStartedOn;
+  const rounds = Number.isInteger(startedOn) ? Math.max(0, player.turns - startedOn) : null;
+  return { tier, rounds };
+}
+
+function hasFinalAscension(game, side) {
+  return ascensionProgress(game, side)?.tier === ASCENSION_STAGES.length - 1;
 }
 
 export function obeliskFireCost(game, side) {
-  return ACTION_COST.fire + (speciesOf(game, side) === "directorate" ? 1 : 0);
+  const surcharge = speciesOf(game, side) === "directorate" && !hasFinalAscension(game, side);
+  return ACTION_COST.fire + (surcharge ? 1 : 0);
 }
 
 export function firingRange(game, from) {
@@ -483,6 +502,7 @@ export function nodeOrders(game, from) {
 
   const player = game.players[side];
   const species = speciesOf(game, side);
+  const finalAscension = hasFinalAscension(game, side);
   const node = tile.node?.type;
   const generator = isFieldGenerator(tile.node);
   const controlled = !!node && nodeController(game, from) === side;
@@ -498,7 +518,8 @@ export function nodeOrders(game, from) {
   };
 
   if (generator || node === "deposit") {
-    const cost = node === "aegis" ? 0 : ACTION_COST.occupy + (species === "veyari" ? 1 : 0);
+    const surcharge = species === "veyari" && !finalAscension;
+    const cost = node === "aegis" ? 0 : ACTION_COST.occupy + (surcharge ? 1 : 0);
     add("occupy", cost, controlled ? "You already control this hex." : null);
   }
   if (generator || node === "vanguard") {
@@ -523,12 +544,17 @@ export function nodeOrders(game, from) {
     "There’s no legal empty neighboring hex.");
   }
   if (species === "veyari" && !territoryMap(game).has(from)) {
-    const blocker = player.phaseJumpTurn === player.turns ? "You have already used Phase Jump this turn." : null;
+    const blocker = !finalAscension && player.phaseJumpTurn === player.turns
+      ? "You have already used Phase Jump this turn." : null;
     add("phase-jump", ACTION_COST.phase, blocker, () => phaseDestinations(game, from, side), "There’s no open landing hex.");
   }
-  if (species === "keth" && generator) {
-    const blocker = !controlled ? "Take control of this hex to fortify."
-      : player.fortificationTurn === player.turns ? "You have already fortified a Proxy this turn." : null;
+  if (species === "keth" && (generator || finalAscension)) {
+    let blocker = null;
+    if (game.proxies[from].fortified) blocker = "This Proxy is already fortified.";
+    else if (!finalAscension && !controlled) blocker = "Take control of this hex to fortify.";
+    else if (!finalAscension && player.fortificationTurn === player.turns) {
+      blocker = "You have already fortified a Proxy this turn.";
+    }
     add("fortify", ACTION_COST.fortify, blocker);
   }
   if (RANGED_NODES[node]) {
@@ -544,10 +570,11 @@ export function proxyMoves(game, from) {
   const side = game.activeSide;
   const player = game.players[side];
   if (!tiles.has(from) || !activeProxyTurn(game, from) || player.tv < ACTION_COST.move) return [];
-  const ascended = ascensionActive(game, side, from);
-  const captureRange = ascended && player.turns >= 12 ? 2 : 1;
-  const moveRange = ascended && player.turns >= 18 ? 2 : 1;
-  const canRefund = ascended && player.turns >= 6 && player.ascensionRefundTurn !== player.turns;
+  const tier = ascensionProgress(game, side)?.tier ?? 0;
+  const localTier = tier && territoryMap(game).has(from) ? tier : 0;
+  const captureRange = localTier >= 2 ? 2 : 1;
+  const moveRange = localTier >= 3 ? 2 : 1;
+  const canRefund = localTier >= 1 && player.ascensionRefundTurn !== player.turns;
   const actions = [];
   for (const { to, occupied, steps } of reachableTiles(game, from, side, captureRange)) {
     if (steps <= (occupied ? captureRange : moveRange)) {
@@ -591,10 +618,9 @@ export function augmentBuyError(game, side, id, hasDeposit = hasAugmentDeposit(g
 export function augmentEffects(game, side) {
   const state = game.players[side].augments;
   const labels = [];
-  if (state?.void) labels.push(`Void · ${VOID_TV_CAP} TV cap`);
+  if (state?.void) labels.push(`Void Erosion · ${VOID_TV_CAP} TV recharge cap`);
   if (augmentStatus(game, side, "hop") === "active") labels.push("Hop");
   if (augmentStatus(game, side, "forward") === "active") labels.push("Forward Deploy");
-  if (state?.inventory.ascension === "active") labels.push("Ascension");
   if (state?.bankedTV) labels.push(`${state.bankedTV} TV banked`);
   if (shieldsJammed(game, side)) labels.push("Shields jammed");
   if (effectOnTurn(game, side, "disablerTurn") && game.activeSide === side) labels.push("Reinforcements blocked");
@@ -610,11 +636,16 @@ function buyAugment(game, side, id) {
   if (id === "void") {
     record(game, side, "augmentUses");
     player.augments = { inventory: {}, void: true, freeProxies: VOID_REINFORCEMENTS };
-    player.tv = Math.min(player.tv, VOID_TV_CAP);
+    player.tv += VOID_INVOCATION_TV;
+    for (const proxy of Object.values(game.proxies)) {
+      if (proxy.side !== side || !proxy.ascensionFortification) continue;
+      delete proxy.fortified;
+      delete proxy.ascensionFortification;
+    }
     for (const to of cradles[side]) {
       if (!game.proxies[to] && freeReserve(game, side)) place(game, to, side, false);
     }
-    log(game, `${sideName(side)} invoked The Call of Void and received ${VOID_REINFORCEMENTS} Proxies.`, "void");
+    log(game, `${sideName(side)} invoked The Call of Void and received ${VOID_INVOCATION_TV} TV and ${VOID_REINFORCEMENTS} Proxies.`, "void");
   } else {
     log(game, `${sideName(side)} bought ${AUGMENT_BY_ID.get(id).name}.`, "purchase");
     if (id === "overload") activateAugment(game, side, id);
@@ -640,6 +671,7 @@ function activateAugment(game, side, id) {
   const nextEnemyTurn = game.players[otherSide(side)].turns + 1;
   switch (id) {
     case "ascension":
+      state.ascensionStartedOn = game.players[side].turns;
       consume(game, side, id, "active");
       return null;
     case "overload": bankOverload(game, side); break;
@@ -661,8 +693,9 @@ function nextHops(game, side, from, visited) {
   for (const [direction, mid] of tiles.get(from).neighbors.entries()) {
     if (mid === null || !game.proxies[mid] || visited.has(mid) || !reachableEdge(game, side, from, mid)) continue;
     const to = tiles.get(mid).neighbors[direction];
-    if (to !== null && !game.proxies[to] && !visited.has(to)
-        && mayEnter(side, to) && reachableEdge(game, side, mid, to)) destinations.push({ to, over: mid });
+    if (to === null || visited.has(to) || !mayEnter(side, to) || !reachableEdge(game, side, mid, to)) continue;
+    const landing = game.proxies[to];
+    if (landing?.side !== side && !landing?.fortified) destinations.push({ to, over: mid });
   }
   return destinations;
 }
@@ -679,10 +712,12 @@ function hopRoute(game, from, path) {
   for (const to of path) {
     const hop = nextHops(projected, side, current, visited).find((candidate) => candidate.to === to);
     if (!hop) return null;
-    if (projected.proxies[hop.over].side !== side) {
+    const jumped = projected.proxies[hop.over];
+    if (jumped.side !== side && !jumped.fortified) {
       hits.push(hop.over);
       delete projected.proxies[hop.over];
     }
+    if (projected.proxies[to]) hits.push(to);
     projected.proxies[to] = projected.proxies[current];
     delete projected.proxies[current];
     visited.add(to);
@@ -710,10 +745,9 @@ function destroyProxies(game, side, targets, attack, stat = HIT_STATS[attack]) {
   let destroyed = 0;
   for (const to of targets) {
     const proxy = game.proxies[to];
-    if ((attack === "fire" || attack === "defensive") && proxy.fortified) {
-      delete proxy.fortified;
+    if (proxy.fortified) {
       record(game, proxy.side, "hitsAbsorbed");
-      log(game, `Fortification at ${tileLabel(to)} absorbed the hit.`, "blocked");
+      log(game, `Fortification at ${tileLabel(to)} blocked the hit.`, "blocked");
     } else {
       delete game.proxies[to];
       record(game, proxy.side, "lost");
@@ -808,12 +842,17 @@ function perform(game, side, { type, from, to, cost, refund }) {
       record(game, side, "shieldsActivated");
       log(game, `${name} activated the shield at ${tileLabel(to)}.`);
       return;
-    case "fortify":
-      game.proxies[from].fortified = true;
-      player.fortificationTurn = player.turns;
+    case "fortify": {
+      const proxy = game.proxies[from];
+      proxy.fortified = true;
+      const baseFortification = player.fortificationTurn !== player.turns
+        && isFieldGenerator(tiles.get(from).node) && nodeController(game, from) === side;
+      if (baseFortification) player.fortificationTurn = player.turns;
+      else proxy.ascensionFortification = true;
       record(game, side, "speciesPowers");
       log(game, `${name} fortified the Proxy at ${tileLabel(from)}.`);
       return;
+    }
     case "fire": {
       const { stat } = RANGED_NODES[tiles.get(from).node.type];
       const destroyed = destroyProxies(game, side, [to], "fire", stat);
@@ -879,6 +918,7 @@ export function applyAction(game, side, action, now = Date.now()) {
       const setupComplete = game.phase === "setup" && game.players[side].placed === STARTING_PROXIES;
       const outOfOrders = game.phase === "play" && game.players[side].tv === 0
         && !(deploymentCost(game, side) === 0 && placementActions(game).length)
+        && augmentBuyError(game, side, "void") !== null
         && !nodes.some(({ id, node }) => node.type === "aegis" && activeProxyTurn(game, id)
           && nodeController(game, id) !== side);
       if (setupComplete || outOfOrders) {

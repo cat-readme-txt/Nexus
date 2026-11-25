@@ -37,7 +37,7 @@ export function speciesCards(onChoose) {
     control.type = "button";
     control.dataset.species = species.id;
     control.addEventListener("click", () => onChoose(species.id));
-    card.append(name, origin, power, control);
+    card.append(name, origin, power, element("p", species.ascension), control);
     get("species-options").append(card);
     return control;
   });
@@ -78,7 +78,7 @@ export function renderReview(game) {
     if (species) {
       const origin = element("p", species.origin);
       origin.className = "muted";
-      card.append(origin, element("p", species.power), element("p", species.counter));
+      card.append(origin, element("p", species.power), element("p", species.ascension), element("p", species.counter));
     }
     return card;
   });

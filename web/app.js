@@ -1,15 +1,15 @@
-import { AUGMENTS } from "./augments.js";
+import { ASCENSION_STAGES, AUGMENTS } from "./augments.js";
 import { createGameAudio } from "./audio.js";
 import { sideName, SIDES, tileLabel, tileName, tiles, wallsBySource } from "./board.js";
 import { createBoardView, IMPACT_MS } from "./board-view.js";
 import { renderHexInspector } from "./hex-inspector.js";
 import { renderReview, renderStats, speciesCards } from "./match-views.js";
 import { onlineAvailable, savedOnlineSession, sendOnline } from "./online.js";
-import { PROXY_SKINS, proxySkin } from "./proxy-skins.js";
+import { effectiveProxySkin, PROXY_SKINS, proxySkin, VOID_PROXY_SKIN } from "./proxy-skins.js";
 import { runTestCommand } from "./terminal.js";
 import { territoryMap } from "./territory.js";
 import {
-  ACTION_COST, advanceClock, allProxies, applyAction, augmentBuyError, augmentEffects, augmentStatus,
+  ACTION_COST, advanceClock, allProxies, applyAction, ascensionProgress, augmentBuyError, augmentEffects, augmentStatus,
   concedeGame, createGame, defensiveTargets, deploymentCost, fabricationError, firingRange, forwardActions, freeReserve,
   hasAugmentDeposit, hopTargets, nodeOrders, placementActions, proxyMoves, RANGED_NODES, readyProxy,
   STARTING_PROXIES, TURN_SECONDS, VOID_TV_CAP,
@@ -65,8 +65,8 @@ const orderDescriptions = {
   occupy: "Take control of this generator. Its offline shield arc turns to face your opponent.",
   "power-shield": "Power this node’s linked shields. They stay active when your Proxy moves away.",
   fire: "Show reachable hexes and choose an enemy Proxy to fire on.",
-  fortify: "Absorb one ranged hit. Armor expires when this Proxy moves or your next turn starts.",
-  "phase-jump": "Jump to an empty hex up to three steps away, ignoring shields. Once per turn.",
+  fortify: "Protect this Proxy from captures and damage through the opponent’s next action phase.",
+  "phase-jump": "Jump from Turbulence to an empty hex up to three steps away, bypassing ordinary shields.",
   "confirm-targets": "Apply the selected targets or route.",
   "cancel-targets": "Discard the current targeting plan.",
   "augments-button": "View, buy, and activate augments. Buying requires an active Proxy on a Deposit you control.",
@@ -128,7 +128,8 @@ function previewAction(id, action, inRange, region) {
     "hop-target": "Hop landing", "defensive-target": "Defensive Strike target",
     "forward-deploy": "Forward deploy", "phase-jump": "Phase jump",
   }[action?.type];
-  const status = name ? `${tileLabel(id)} · ${name} · ${action.cost} TV${action.refund ? " refunded by Ascension" : ""}`
+  const blocked = action?.type === "fire" && game.proxies[id]?.fortified;
+  const status = name ? `${tileLabel(id)} · ${name} · ${action.cost} TV${action.refund ? " refunded by Ascension" : ""}${blocked ? " · Fortified target" : ""}`
     : inRange ? `${tileLabel(id)} · In firing range`
       : tile ? `${tileLabel(id)} · ${tileName(tile, region)}` : playTurnTitle();
   text("board-status", status);
@@ -182,12 +183,15 @@ function renderSkinSetting() {
   const online = screen === "online";
   const side = online ? seat : local ? game.activeSide : "blue";
   const localHandoff = local && (game.phase === "species" ? !selectionReady : game.deadline === null);
+  const skin = effectiveProxySkin(game, side, (online ? onlineSkins : localSkins)[side]);
+  const eroded = skin === VOID_PROXY_SKIN;
   text("proxy-design-label", local || online ? `${sideName(side)} Proxy skin` : "Default Proxy skin");
-  text("proxy-design-help", localHandoff ? "Available when you take your turn."
+  text("proxy-design-help", eroded ? "The Call of Void locks your Proxies to Void Erosion for this match."
+    : localHandoff ? "Available when you take your turn."
     : local || online ? `Applies to ${sideName(side)}’s Proxies.`
       : "Used for Blue in pass-and-play and for your seat online.");
-  proxyDesign.value = proxySkin((online ? onlineSkins : localSkins)[side]);
-  proxyDesign.disabled = localHandoff || screen === "waiting" || (online && pending);
+  proxyDesign.value = skin;
+  proxyDesign.disabled = eroded || localHandoff || screen === "waiting" || (online && pending);
 }
 
 function hopLandings(path) {
@@ -401,14 +405,24 @@ function ordersDescription(hasHopLanding) {
   if (order === "forward") return "Choose a highlighted hex beside the Aegis.";
   if (order === "phase-jump") return "Choose an open landing hex.";
   if (order === "defensive") return `${plan.length} of 3 targets selected. Choose enemy Proxies in your territory.`;
-  if (order === "hop") return "Choose another landing or confirm. The hop captures any enemies you jump over. Select the last landing to undo it.";
+  if (order === "hop") return "Choose another landing or confirm. Hop captures unprotected enemies you jump over or land on. Select the last landing to undo it.";
   if (game.players[game.activeSide].tv === 0) return "You have 0 TV. Choose an available free order or end your turn.";
   if (selected !== null && game.proxies[selected]?.side === game.activeSide) {
-    if (hasHopLanding) return "Choose a Move destination or a highlighted Hop landing. Hopping over an enemy captures it.";
+    if (hasHopLanding) return "Choose a Move destination or a violet Hop landing. Hop captures unprotected enemies you jump over or land on.";
     return readyProxy(game, selected) ? "Choose a highlighted hex to move. Moving onto an enemy Proxy captures it."
       : "This Proxy can act starting on your next turn.";
   }
   return "Select a Proxy to see its moves, or choose a hex to inspect it.";
+}
+
+function drawAugmentIcon(icon, path) {
+  const drawing = icon.getContext("2d");
+  drawing.setTransform(icon.width / 26, 0, 0, icon.height / 26, 0, 0);
+  drawing.clearRect(0, 0, 26, 26);
+  drawing.strokeStyle = "#f1d18c";
+  drawing.lineWidth = 1.6;
+  drawing.lineCap = drawing.lineJoin = "round";
+  drawing.stroke(new Path2D(path));
 }
 
 function augmentRow(augment) {
@@ -417,12 +431,7 @@ function augmentRow(augment) {
   icon.className = "augment-icon";
   icon.width = icon.height = 52;
   icon.setAttribute("aria-hidden", "true");
-  const drawing = icon.getContext("2d");
-  drawing.scale(2, 2);
-  drawing.strokeStyle = "#f1d18c";
-  drawing.lineWidth = 1.6;
-  drawing.lineCap = drawing.lineJoin = "round";
-  drawing.stroke(new Path2D(augment.iconPath));
+  drawAugmentIcon(icon, augment.iconPath);
   const name = document.createElement("h3");
   const description = document.createElement("p");
   const details = document.createElement("div");
@@ -435,6 +444,24 @@ function augmentRow(augment) {
   row.append(icon, details, control);
   get("augment-list").append(row);
   return { augment, row, control };
+}
+
+function renderAscension(side) {
+  const progress = ascensionProgress(game, side);
+  hide(`${side}-ascension`, !progress);
+  if (!progress) return;
+  const { tier, rounds } = progress;
+  const { label, iconPath } = ASCENSION_STAGES[tier];
+  const icon = get(`${side}-ascension-icon`);
+  if (Number(icon.dataset.tier) !== tier) {
+    icon.dataset.tier = tier;
+    drawAugmentIcon(icon, iconPath);
+  }
+  text(`${side}-ascension-stage`, `Ascension · ${label}`);
+  hide(`${side}-ascension-rounds`, rounds === null);
+  if (rounds !== null) {
+    text(`${side}-ascension-rounds`, `${rounds} ${rounds === 1 ? "round" : "rounds"} since activation`);
+  }
 }
 
 function chooseAugment(id) {
@@ -478,7 +505,7 @@ function renderAugments() {
     control.setAttribute("aria-label", `${augment.name}, ${control.textContent}`);
   }
   text("augment-count", ready ? `${ready} ready` : "");
-  const status = player.augments?.void ? `The Call of Void is active. Deployments cost 0 TV. Your recharge cap is ${VOID_TV_CAP} TV.`
+  const status = player.augments?.void ? `Void Erosion is active. Your species uses its base abilities. Deployed Proxies arrive active for 0 TV. Your recharge cap is ${VOID_TV_CAP} TV.`
     : deposit ? "Deposit staffed. Each augment can be bought once in this match."
       : "Staff a claimed Deposit with an active Proxy to buy augments.";
   text("augment-status", `${sideName(side)} · ${player.tv} TV. ${status}`);
@@ -523,6 +550,7 @@ function renderMatch() {
     const effects = augmentEffects(game, side);
     text(`${side}-effects`, effects.join(" · "));
     hide(`${side}-effects`, !effects.length);
+    renderAscension(side);
   }
 
   const canOrder = usableTurn() && !setup;
@@ -554,16 +582,20 @@ function renderMatch() {
   const range = showRange ? firingRange(game, selected).map(({ to }) => to) : [];
   hide("range-key", !showRange);
   hide("hop-key", !hasHopLanding);
+  hide("fortification-key", !field.some((proxy) => proxy.fortified));
   hide("linked-shield-key", !wallsBySource.has(inspected) && tiles.get(inspected)?.node?.type !== "nexus");
   hide("reinforcements", !showOrders);
   text("deploy-cost", `${deploymentCost(game, game.activeSide)} TV`);
-  renderOrderControl("deploy", orderError ?? (placementActions(game).length ? null : "Requires a reserve Proxy, enough TV, and an empty Cradle hex."));
+  const deployError = placementActions(game).length ? null : "Requires a reserve Proxy, enough TV, and an empty Cradle hex.";
+  const deployHelp = game.players[game.activeSide].augments?.void
+    ? "Deploy an immediately active reserve Proxy on an empty Cradle hex for 0 TV." : undefined;
+  renderOrderControl("deploy", orderError ?? deployError, deployHelp);
   renderOrderControl("fabricate", orderError ?? fabricationError(game, game.activeSide));
   hide("turn-actions", setup || finished || handoff);
   hide("target-actions", !targeting());
   text("confirm-targets", order === "hop" ? `Confirm hop · ${ACTION_COST.move} TV` : "Use Defensive Strike");
   renderOrderControl("confirm-targets", turnError ?? (plan.length ? null : "Choose a target or landing hex first."),
-    order === "hop" ? "Commit the route and capture enemies you jump over." : "Strike each selected enemy Proxy in your territory.");
+    order === "hop" ? "Commit the route and capture unprotected enemies you jump over or land on." : "Strike each selected enemy Proxy in your territory.");
   renderOrderControl("cancel-targets", null);
   renderOrderControl("augments-button", null);
   renderOrderControl("end-turn", turnError);

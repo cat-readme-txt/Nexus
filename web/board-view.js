@@ -2,7 +2,7 @@ import {
   board, nexus, nexusWalls, nexusWallsByEdge, sideName, tileLabel, tileName, tiles, wallsByEdge,
 } from "./board.js";
 import { NODE_ICONS } from "./hex-inspector.js";
-import { DEFAULT_PROXY_SKIN } from "./proxy-skins.js";
+import { effectiveProxySkin, VOID_PROXY_SKIN } from "./proxy-skins.js";
 import { nodeController, poweredBorder, proxyReady, wallActive } from "./rules.js";
 
 export const IMPACT_MS = 220;
@@ -53,6 +53,12 @@ const DRONE = [
   [0, -12], [5.4, -7.2], [6.7, -3.5], [11.2, .6], [11.2, 7.5], [5.5, 5.8],
   [0, 10.2], [-5.5, 5.8], [-11.2, 7.5], [-11.2, .6], [-6.7, -3.5], [-5.4, -7.2],
 ];
+const VOID_MASK = [
+  [-11, -12.5], [-5.4, -8.4], [-3, -5.8], [3, -5.8], [5.4, -8.4], [11, -12.5],
+  [10, -3], [7.4, 5.6], [0, 11], [-7.4, 5.6], [-10, -3],
+];
+const voidRifts = new Path2D("M-5-1.5l3 1.5m4 0 3-1.5M1 2-1 4l1.6 1.3L0 8");
+const fortificationShell = new Path2D("M-16-4v-5l11-5m10 0 11 5v5M-16 4v3q4 5 16 9 12-4 16-9V4");
 const directionKeys = { w: 0, e: 1, d: 2, s: 3, a: 4, q: 5, ArrowUp: 0, ArrowDown: 3 };
 
 export function createBoardView(canvas, viewport, chooseTile, previewAction) {
@@ -136,20 +142,19 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
         ctx.drawImage(assets[kind], x - size / 2, y - size / 2, size, size);
       }
       if (cache && !kind) drawCache(x, y);
-      if (action) {
+      if (action && !hop) {
         const dy = kind || cache ? 12 : 0;
-        if (hop) {
-          ctx.save();
-          ctx.translate(x, y + dy);
-          ctx.rotate(Math.PI / 4);
-          ctx.fillStyle = "#e4b5f5";
-          ctx.fillRect(-3.2, -3.2, 6.4, 6.4);
-          ctx.restore();
-        } else {
-          circle(x, y + dy, 5.2, "#183231");
-          circle(x, y + dy, 2.8, "#b3eee0");
-        }
+        circle(x, y + dy, 5.2, "#183231");
+        circle(x, y + dy, 2.8, "#b3eee0");
       }
+    }
+    if (hop) {
+      ctx.save();
+      ctx.translate(x + (proxy ? 13 : 0), y + (proxy || kind || cache ? 12 : 0));
+      ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = "#e4b5f5";
+      ctx.fillRect(-3.2, -3.2, 6.4, 6.4);
+      ctx.restore();
     }
     if (kind && cache) drawCache(x - 12, y + 10, .7);
     if (captured) {
@@ -194,9 +199,11 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
   }
 
   function drawProxy(proxy, x, y, ready, action) {
-    const proxyDesign = playerSkins[proxy.side] ?? DEFAULT_PROXY_SKIN;
+    const proxyDesign = effectiveProxySkin(game, proxy.side, playerSkins[proxy.side]);
     const classic = proxyDesign === "classic";
     const drone = proxyDesign === "drone";
+    const eroded = proxyDesign === VOID_PROXY_SKIN;
+    const silhouette = eroded ? VOID_MASK : drone ? DRONE : null;
     const color = team[proxy.side];
     ctx.save();
     ctx.translate(x, y);
@@ -204,13 +211,13 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
     if (!ready) ctx.setLineDash([3, 2]);
     ctx.beginPath();
     if (classic) traceClassicProxy();
-    else if (drone) {
-      ctx.moveTo(...DRONE[0]);
-      for (let i = 1; i < DRONE.length; i += 1) ctx.lineTo(...DRONE[i]);
+    else if (silhouette) {
+      ctx.moveTo(...silhouette[0]);
+      for (let i = 1; i < silhouette.length; i += 1) ctx.lineTo(...silhouette[i]);
     } else ctx.arc(0, 0, 9.9, 0, 2 * Math.PI);
     ctx.closePath();
-    ctx.fillStyle = ready ? color.body : "#26313b";
-    ctx.strokeStyle = action ? "#ffdea0" : color.light;
+    ctx.fillStyle = eroded ? "#291b30" : ready ? color.body : "#26313b";
+    ctx.strokeStyle = action && !eroded ? "#ffdea0" : color.light;
     ctx.lineWidth = action ? 2.5 : 2;
     ctx.fill();
     ctx.stroke();
@@ -227,12 +234,17 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
       ctx.fillStyle = color.light;
       ctx.fillRect(-3.5, -2.9, 7, 2);
       if (ready) ctx.fillRect(-1, 2.8, 2, 2);
+    } else if (eroded) {
+      ctx.strokeStyle = "#ff7d9a";
+      ctx.lineWidth = 1.5;
+      ctx.lineCap = "round";
+      ctx.stroke(voidRifts);
     }
     if (proxy.fortified) {
-      hex(0, 0, 14);
       ctx.strokeStyle = "#ffdb91";
-      ctx.lineWidth = 1.8;
-      ctx.stroke();
+      ctx.lineWidth = 2;
+      ctx.lineCap = ctx.lineJoin = "round";
+      ctx.stroke(fortificationShell);
     }
     ctx.restore();
   }

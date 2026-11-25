@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { cradles } from "../web/board.js";
+import { effectiveProxySkin, VOID_PROXY_SKIN } from "../web/proxy-skins.js";
 import { TURN_SECONDS } from "../web/rules.js";
 import { createLobby, matchRequest, processMatch } from "../server/matchmaking.js";
 
@@ -93,6 +94,33 @@ test("online skins belong to each seat and cosmetic changes leave order revision
   const action = a("action", { room, revision: setup.revision, action: { type: "place", to: cradles.blue[0] } });
   assert.equal(action.error, undefined);
   assert.equal(action.game.players.blue.placed, 1);
+});
+
+test("The Call of Void locks only the invoking seat to Void Erosion in an online match", () => {
+  const lobby = createLobby();
+  const a = client(lobby, blue);
+  const b = client(lobby, red);
+  a("find", { skin: "drone" });
+  const { room } = b("find", { skin: "classic" });
+  pick(a, room, "directorate");
+  pick(b, room, "keth");
+  const game = lobby.rooms[room].game;
+  Object.assign(game, { phase: "play", round: 1 });
+  Object.assign(game.players.blue, { tv: 4, turns: 1 });
+  game.proxies[64] = { side: "blue", readyOn: 0 };
+  game.claims[64] = { held: "blue" };
+  assert.equal(a("action", { room, revision: game.revision, action: { type: "buy-augment", augment: "void" } }).error, undefined);
+  const match = b("poll");
+  assert.equal(match.game.players.blue.tv, 14);
+  assert.equal(match.game.players.red.tv, 0);
+  assert.equal(effectiveProxySkin(match.game, "blue", match.proxySkins.blue), VOID_PROXY_SKIN);
+  assert.equal(effectiveProxySkin(match.game, "red", match.proxySkins.red), "classic");
+  assert.match(a("skin", { room, skin: "disc" }).error, /locks.*Void Erosion/);
+  assert.equal(lobby.rooms[room].proxySkins.blue, "drone");
+  assert.match(b("skin", { room, skin: VOID_PROXY_SKIN }).error, /valid Proxy skin/);
+  const changed = b("skin", { room, skin: "disc" });
+  assert.equal(changed.error, undefined);
+  assert.equal(effectiveProxySkin(changed.game, "red", changed.proxySkins.red), "disc");
 });
 
 test("the server advances deadlines and refuses commands from expired revisions", () => {

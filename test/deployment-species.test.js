@@ -215,6 +215,38 @@ test("Directorate Obelisk shots cost 2 TV", () => {
   assert.equal(game.proxies[6], undefined);
 });
 
+test("Directorate Tier III increases recharge and reduces fire cost until the Call of Void", () => {
+  const game = playing();
+  game.round = 16;
+  game.players.blue.turns = 16;
+  game.players.blue.augments = { inventory: { ascension: "active" } };
+  for (const { id } of board.slice(0, 55)) if (id !== 5) place(game, id); // F1 is the firing lane.
+  place(game, 6, "red");
+  place(game, 46, "red");
+  place(game, 64);
+  game.claims[64] = { held: "blue" };
+
+  nextBlueTurn(game);
+  assert.equal(game.players.blue.turns, 17);
+  assert.equal(game.players.blue.tv, 40);
+  assert.equal(nodeOrders(game, 4).find(({ type }) => type === "fire").cost, 2);
+
+  nextBlueTurn(game);
+  assert.equal(game.players.blue.turns, 18);
+  assert.equal(game.players.blue.tv, 50);
+  const capture = () => proxyActions(game, 45).find(({ type, to }) => type === "move" && to === 46);
+  assert.equal(capture().refund, 1);
+  assert.equal(act(game, { type: "fire", from: 4, to: 6 }), null);
+  assert.equal(game.players.blue.tv, 49);
+
+  assert.equal(act(game, { type: "buy-augment", augment: "void" }), null);
+  assert.equal(game.players.blue.tv, 59);
+  assert.equal(nodeOrders(game, 4).find(({ type }) => type === "fire").cost, 2);
+  assert.equal(capture().refund, undefined);
+  nextBlueTurn(game);
+  assert.equal(game.players.blue.tv, 20);
+});
+
 test("Veyari jump ignores ordinary shields once per turn and paid occupation costs 4 TV", () => {
   const game = playing("veyari", "directorate");
   place(game, 53);
@@ -236,25 +268,133 @@ test("Veyari jump ignores ordinary shields once per turn and paid occupation cos
   assert.equal(nodeController(game, 162), "blue");
 });
 
-test("Keth armor absorbs one Obelisk hit and a second shot removes the Proxy", () => {
+test("Veyari at Tier III can repeat Phase Jump and pay the base occupation cost", () => {
+  const game = playing("veyari", "directorate");
+  game.round = 18;
+  game.players.blue.turns = 18;
+  game.players.blue.augments = { inventory: { ascension: "active" } };
+  place(game, 53);
+  place(game, 162);
+  place(game, 76);
+  for (const [from, to] of [[53, 52], [52, 53]]) {
+    assert.equal(act(game, { type: "phase-jump", from, to }), null);
+  }
+  assert.equal(game.stats.blue.speciesPowers, 2);
+  assert.equal(game.players.blue.tv, 8);
+  for (const id of [162, 76]) {
+    const claim = proxyActions(game, id).find(({ type }) => type === "occupy");
+    assert.equal(claim.cost, 3);
+    assert.equal(act(game, claim), null);
+  }
+  assert.equal(game.players.blue.tv, 2);
+});
+
+test("the Call of Void restores the Veyari jump limit and occupation surcharge immediately", () => {
+  const game = playing("veyari");
+  game.round = 18;
+  game.players.blue.turns = 18;
+  game.players.blue.augments = { inventory: { ascension: "active" } };
+  place(game, 64);
+  game.claims[64] = { held: "blue" };
+  place(game, 53);
+  place(game, 162);
+  const jump = { type: "phase-jump", from: 53, to: 52 };
+  const returnJump = { type: "phase-jump", from: 52, to: 53 };
+  assert.equal(act(game, jump), null);
+  assert.equal(act(game, returnJump), null);
+
+  assert.equal(act(game, { type: "buy-augment", augment: "void" }), null);
+  assert.match(act(game, jump), /unavailable/);
+  const claim = proxyActions(game, 162).find(({ type }) => type === "occupy");
+  assert.equal(claim.cost, 4);
+  assert.equal(act(game, claim), null);
+  nextBlueTurn(game);
+  assert.equal(act(game, jump), null);
+  assert.match(act(game, returnJump), /unavailable/);
+});
+
+test("Keth fortification follows the Proxy and blocks every hit through the opponent's turn", () => {
   const game = playing("keth", "veyari");
-  const target = 126;
-  game.claims[target] = { held: "blue", pending: null };
-  place(game, target);
-  place(game, 76, "red");
-  const fortify = { type: "fortify", from: target, to: target };
+  const source = 126; // B6 Aegis
+  const target = 101; // B5
+  const obelisk = 76; // B4
+  game.claims[source] = { held: "blue", pending: null };
+  place(game, source);
+  place(game, 4); // E1 Obelisk
+  place(game, obelisk, "red");
+  const fortify = { type: "fortify", from: source, to: source };
   assert.equal(act(game, fortify), null);
+  assert.match(nodeOrders(game, 4).find(({ type }) => type === "fortify").error, /already fortified/);
+  assert.equal(act(game, { type: "move", from: source, to: target }), null);
   assert.equal(game.proxies[target].fortified, true);
-  assert.match(act(game, fortify), /unavailable/);
+
   assert.equal(act(game, { type: "end" }), null);
-  const shot = { type: "fire", from: 76, to: target };
+  assert.match(act(game, { type: "move", from: obelisk, to: target }), /unavailable/);
+  const shot = { type: "fire", from: obelisk, to: target };
   assert.equal(act(game, shot), null);
-  assert.equal(game.proxies[target].side, "blue");
-  assert.equal(game.proxies[target].fortified, undefined);
+  assert.equal(act(game, shot), null);
+  assert.equal(game.proxies[target].fortified, true);
   assert.equal(game.players.red.reserve, 0);
-  assert.equal(game.stats.blue.hitsAbsorbed, 1);
+  assert.equal(game.stats.blue.hitsAbsorbed, 2);
+
+  assert.equal(act(game, { type: "end" }), null);
+  assert.equal(game.proxies[target].fortified, undefined);
+  assert.equal(act(game, { type: "end" }), null);
   assert.equal(act(game, shot), null);
   assert.equal(game.proxies[target], undefined);
   assert.equal(game.players.red.reserve, 1);
   assert.equal(game.stats.blue.lost, 1);
+});
+
+test("Keth at Tier III can fortify multiple active Proxies anywhere and deploy at base cost", () => {
+  const game = playing("keth");
+  game.round = 17;
+  game.players.blue.turns = 17;
+  game.players.blue.reserve = 1;
+  game.players.blue.augments = { inventory: { ascension: "active" } };
+  place(game, 53); // ordinary Turbulence hex
+  place(game, 76); // Red Obelisk, still controlled by Red
+  place(game, 126);
+  assert(!nodeOrders(game, 53).some(({ type }) => type === "fortify"));
+  assert.match(nodeOrders(game, 76).find(({ type }) => type === "fortify").error, /Take control/);
+  assert.equal(placementActions(game)[0].cost, 2);
+
+  nextBlueTurn(game);
+  for (const id of [53, 76]) {
+    const order = nodeOrders(game, id).find(({ type }) => type === "fortify");
+    assert.equal(order.cost, 2);
+    assert.equal(act(game, order.actions[0]), null);
+    assert.equal(game.proxies[id].fortified, true);
+  }
+  assert.match(nodeOrders(game, 53).find(({ type }) => type === "fortify").error, /already fortified/);
+  assert.equal(game.stats.blue.speciesPowers, 2);
+  const deploy = placementActions(game)[0];
+  assert.equal(deploy.cost, 1);
+  assert.equal(act(game, deploy), null);
+  assert.equal(game.players.blue.tv, 1);
+});
+
+test("the Call of Void ends Keth fortifications that required Ascension Tier III", () => {
+  const game = playing("keth", "keth");
+  game.round = 18;
+  game.players.blue.turns = 18;
+  game.players.blue.augments = { inventory: { ascension: "active" } };
+  for (const id of [4, 53, 64, 71]) place(game, id);
+  game.claims[64] = { held: "blue" };
+  place(game, 76, "red");
+  game.proxies[76].fortified = true;
+  for (const id of [53, 4, 71]) {
+    assert.equal(act(game, { type: "fortify", from: id, to: id }), null);
+    assert.equal(game.proxies[id].fortified, true);
+  }
+  assert.equal(act(game, { type: "move", from: 53, to: 52 }), null);
+  assert.equal(game.proxies[52].fortified, true);
+
+  assert.equal(act(game, { type: "buy-augment", augment: "void" }), null);
+  assert.equal(game.proxies[4].fortified, true);
+  assert.equal(game.proxies[76].fortified, true);
+  assert.equal(game.proxies[52].fortified, undefined);
+  assert.equal(game.proxies[71].fortified, undefined);
+  assert(!nodeOrders(game, 52).some(({ type }) => type === "fortify"));
+  assert.match(nodeOrders(game, 71).find(({ type }) => type === "fortify").error, /already fortified a Proxy this turn/);
 });

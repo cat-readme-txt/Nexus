@@ -136,6 +136,8 @@ export function processMatch(lobby, request, now) {
   if (op === "skin") {
     if (!room?.game || room.code !== request.room) {
       error = "That match has ended.";
+    } else if (room.game.players[side].augments?.void) {
+      error = "The Call of Void locks this team to the Void Erosion skin.";
     } else if (!PROXY_SKINS.has(request.skin)) {
       error = "Choose a valid Proxy skin.";
     } else if (room.proxySkins?.[side] !== request.skin) {

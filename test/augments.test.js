@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { board, cradles, tiles, vanguards, walls } from "../web/board.js";
+import { board, cradles, nexus, tiles, vanguards, walls } from "../web/board.js";
 import {
-  applyAction, augmentStatus, baseShieldActive, createGame, defensiveTargets, freeReserve,
+  applyAction, ascensionProgress, augmentStatus, baseShieldActive, createGame, defensiveTargets, freeReserve,
   hopTargets, MAX_TV, placementActions, proxyActions, readyProxy, wallActive,
 } from "../web/rules.js";
 
@@ -58,23 +58,23 @@ test("an augment requires a claimed, staffed Deposit at purchase and can be used
   assert.match(buy(game, "emp"), /unavailable/);
 });
 
-test("Hop unlocks repeatable 1 TV chains that capture every enemy jumped on confirmation", () => {
+test("Hop unlocks repeatable 1 TV chains that capture jumped enemies and occupied landings on confirmation", () => {
   const game = scenario();
-  for (const id of [10, 35, 161]) placeProxy(game, id);
-  placeProxy(game, 85, "red");
-  game.proxies[85].fortified = true;
-  placeProxy(game, 135, "red");
+  for (const id of [10, 35, 110, 161]) placeProxy(game, id);
+  for (const id of [60, 85, 135]) placeProxy(game, id, "red");
   game.caches = [60];
   assert.deepEqual(hopTargets(game, 10), []);
   assert.equal(buy(game, "hop"), null);
   assert.equal(augmentStatus(game, "blue", "hop"), "active");
   assert.deepEqual(hopTargets(game, 10), [60]);
+  assert.deepEqual(hopTargets(game, 10, [60]), []);
+  assert.match(play(game, { type: "hop", augment: "hop", from: 10, path: [60, 110] }), /legal hop/);
+  placeProxy(game, 110, "red");
   assert.deepEqual(hopTargets(game, 10, [60]), [110]);
   assert.deepEqual(hopTargets(game, 10, [60, 110]), [160]);
   assert.match(play(game, { type: "hop", augment: "hop", from: 10, path: [60, 110, 135] }), /legal hop/);
   assert.equal(game.players.blue.tv, 25);
-  assert.equal(game.proxies[85].side, "red");
-  assert.equal(game.proxies[135].side, "red");
+  assert([60, 85, 110, 135].every((id) => game.proxies[id].side === "red"));
   assert.equal(game.players.blue.reserve, 0);
   assert.deepEqual(game.caches, [60]);
   assert.equal(play(game, { type: "hop", augment: "hop", from: 10, path: [60, 110, 160] }), null);
@@ -82,21 +82,20 @@ test("Hop unlocks repeatable 1 TV chains that capture every enemy jumped on conf
   assert.equal(game.proxies[10], undefined);
   assert.equal(game.proxies[35].side, "blue");
   assert.equal(game.proxies[160].side, "blue");
-  assert.equal(game.proxies[85], undefined);
-  assert.equal(game.proxies[135], undefined);
-  assert.equal(game.players.blue.reserve, 3);
+  assert([60, 85, 110, 135].every((id) => game.proxies[id] === undefined));
+  assert.equal(game.players.blue.reserve, 5);
   assert.deepEqual(game.caches, []);
   assert.equal(game.stats.blue.salvaged, 1);
-  assert.equal(game.stats.blue.hopCaptures, 2);
-  assert.equal(game.stats.blue.eliminated, 2);
-  assert.equal(game.stats.red.lost, 2);
-  assert.deepEqual(game.impacts.at(-1).tiles, [85, 135]);
+  assert.equal(game.stats.blue.hopCaptures, 4);
+  assert.equal(game.stats.blue.eliminated, 4);
+  assert.equal(game.stats.red.lost, 4);
+  assert.deepEqual(game.impacts.at(-1).tiles, [60, 85, 110, 135]);
   assert.deepEqual(hopTargets(game, 160), [137]);
   assert.equal(play(game, { type: "hop", augment: "hop", from: 160, path: [137] }), null);
   assert.equal(game.players.blue.tv, 23);
   assert.equal(game.proxies[137].side, "blue");
   assert.equal(game.proxies[161].side, "blue");
-  assert.equal(game.stats.blue.hopCaptures, 2);
+  assert.equal(game.stats.blue.hopCaptures, 4);
   assert.equal(game.stats.blue.augmentUses, 2);
   giveTurn(game);
   giveTurn(game);
@@ -104,16 +103,57 @@ test("Hop unlocks repeatable 1 TV chains that capture every enemy jumped on conf
   assert.deepEqual(hopTargets(game, 137), [160]);
 });
 
+test("Hop can pass over a fortified enemy without capturing it, but its hex blocks landings", () => {
+  const game = scenario();
+  placeProxy(game, 10);
+  for (const id of [35, 60]) {
+    placeProxy(game, id, "red");
+    game.proxies[id].fortified = true;
+  }
+  assert.equal(buy(game, "hop"), null);
+  const hop = { type: "hop", augment: "hop", from: 10, path: [60] };
+  assert.deepEqual(hopTargets(game, 10), []);
+  assert.match(play(game, hop), /legal hop/);
+  assert.equal(game.proxies[60].side, "red");
+  assert.equal(game.players.blue.tv, 25);
+
+  delete game.proxies[60].fortified;
+  assert.deepEqual(hopTargets(game, 10), [60]);
+  assert.equal(play(game, hop), null);
+  assert.equal(game.proxies[35].side, "red");
+  assert.equal(game.proxies[35].fortified, true);
+  assert.equal(game.proxies[60].side, "blue");
+  assert.equal(game.stats.blue.hopCaptures, 1);
+  assert.deepEqual(game.impacts.at(-1).tiles, [60]);
+});
+
 test("Hop captures trigger retaliation per enemy and respect Troop Disabler", () => {
   const game = scenario();
   placeProxy(game, 60);
-  for (const id of [85, 135]) placeProxy(game, id, "red");
+  for (const id of [85, 110, 135]) placeProxy(game, id, "red");
   assert.equal(buy(game, "hop"), null);
   game.players.red.augments = { inventory: {}, retaliationTurn: game.players.blue.turns, disablerTurn: game.players.blue.turns };
   assert.equal(play(game, { type: "hop", augment: "hop", from: 60, path: [110, 160] }), null);
-  assert.equal(game.players.blue.tv, 20);
+  assert.equal(game.players.blue.tv, 18);
   assert.equal(game.players.blue.reserve, 0);
+  assert.equal(game.stats.blue.hopCaptures, 3);
+});
+
+test("hopping onto an occupied enemy Nexus captures its Proxy and wins the match", () => {
+  const game = scenario();
+  const to = nexus.red;
+  const mid = tiles.get(to).neighbors[0];
+  const from = tiles.get(mid).neighbors[0];
+  placeProxy(game, from);
+  placeProxy(game, mid, "red");
+  placeProxy(game, to, "red");
+  assert.equal(buy(game, "hop"), null);
+  assert(hopTargets(game, from).includes(to));
+  assert.equal(play(game, { type: "hop", augment: "hop", from, path: [to] }), null);
+  assert.equal(game.proxies[to].side, "blue");
   assert.equal(game.stats.blue.hopCaptures, 2);
+  assert.equal(game.winner, "blue");
+  assert.equal(game.phase, "finished");
 });
 
 test("Hop carries forward from earlier matches and The Call of Void removes it", () => {
@@ -135,10 +175,13 @@ test("Ascension unlocks its tiers using the player's turns and leaves core actio
   placeProxy(game, left);
   placeProxy(game, center, "red");
   assert.equal(buy(game, "ascension"), null);
+  assert.equal(ascensionProgress(game, "blue"), null);
   assert.equal(use(game, "ascension"), null);
+  assert.deepEqual(ascensionProgress(game, "blue"), { tier: 0, rounds: 0 });
   assert.equal(play(game, { type: "move", from: left, to: center }), null);
   assert.equal(game.players.blue.tv, 19);
   game.players.blue.turns = 6;
+  assert.deepEqual(ascensionProgress(game, "blue"), { tier: 1, rounds: 1 });
   placeProxy(game, right, "red");
   assert.equal(proxyActions(game, center).find(({ to }) => to === right).refund, 1);
   assert.equal(play(game, { type: "move", from: center, to: right }), null);
@@ -154,6 +197,7 @@ test("Ascension unlocks its tiers using the player's turns and leaves core actio
   game.players.blue.turns = 11;
   assert(!proxyActions(game, left).some((a) => a.to === right));
   game.players.blue.turns = 12;
+  assert.deepEqual(ascensionProgress(game, "blue"), { tier: 2, rounds: 7 });
   const move = proxyActions(game, left).find((a) => a.to === right);
   assert.equal(move.type, "move");
   assert.equal(move.cost, 1);
@@ -163,6 +207,7 @@ test("Ascension unlocks its tiers using the player's turns and leaves core actio
   assert.equal(game.proxies[left], undefined);
   assert(!proxyActions(game, right).some((a) => a.to === left));
   game.players.blue.turns = 18;
+  assert.deepEqual(ascensionProgress(game, "blue"), { tier: 3, rounds: 13 });
   assert.equal(proxyActions(game, right).find((a) => a.to === left).cost, 1);
   placeProxy(game, 163);
   placeProxy(game, 162, "red");
@@ -170,6 +215,24 @@ test("Ascension unlocks its tiers using the player's turns and leaves core actio
   const turbulent = proxyActions(game, 163).filter(({ type }) => type === "move");
   assert(turbulent.some(({ to }) => to === 162));
   assert(turbulent.every(({ to, refund }) => !refund && tiles.get(163).neighbors.includes(to)));
+});
+
+test("Ascension counts completed play cycles from activation even when activated late", () => {
+  const game = scenario(12);
+  giveTurn(game);
+  placeProxy(game, deposit, "red");
+  game.claims[deposit] = { held: "red" };
+  game.players.red.tv = 15;
+  assert.equal(buy(game, "ascension"), null);
+  assert.equal(use(game, "ascension"), null);
+  assert.deepEqual(ascensionProgress(game, "red"), { tier: 2, rounds: 0 });
+  giveTurn(game);
+  assert.deepEqual(ascensionProgress(game, "red"), { tier: 2, rounds: 0 });
+  giveTurn(game);
+  assert.deepEqual(ascensionProgress(game, "red"), { tier: 2, rounds: 1 });
+  assert.equal(ascensionProgress(game, "blue"), null);
+  delete game.players.red.augments.ascensionStartedOn;
+  assert.deepEqual(ascensionProgress(game, "red"), { tier: 2, rounds: null });
 });
 
 test("Overload stores half the TV after its 5 TV price, rounded up, and adds it after recharge", () => {
@@ -199,23 +262,39 @@ test("the Call of Void fills empty Cradle tiles and banks the rest of the 30 fre
   placeProxy(game, cradles.blue[0], "red");
   assert.equal(buy(game, "ascension"), null);
   assert.equal(use(game, "ascension"), null);
+  game.players.blue.tv = 28;
   assert.equal(buy(game, "void"), null);
+  assert.equal(game.players.blue.tv, 38);
   const fielded = cradles.blue.filter((id) => game.proxies[id].side === "blue");
   assert.equal(fielded.length + freeReserve(game, "blue"), 30);
-  assert(fielded.every((id) => !readyProxy(game, id)));
+  assert(fielded.every((id) => readyProxy(game, id)));
   assert.equal(augmentStatus(game, "blue", "ascension"), "locked");
+  assert.equal(ascensionProgress(game, "blue"), null);
   assert.equal(augmentStatus(game, "blue", "void"), "active");
   assert.equal(game.proxies[cradles.blue[0]].side, "red");
-  const to = fielded[0];
+  const to = fielded.find((id) => tiles.get(id).node?.type === "sentinel");
   delete game.proxies[to];
   assert.equal(placementActions(game).find((a) => a.to === to).cost, 0);
   assert.equal(play(game, { type: "spawn", to }), null);
-  assert.equal(game.players.blue.tv, 20);
+  assert.equal(game.players.blue.tv, 38);
   assert.equal(game.proxies[to].side, "blue");
+  assert(readyProxy(game, to));
+  assert.equal(play(game, { type: "power-shield", from: to, to }), null);
   giveTurn(game);
   giveTurn(game);
   assert(readyProxy(game, to));
   assert.equal(game.players.blue.tv, 20);
+});
+
+test("a staffed Deposit keeps a 0 TV phase open so the Call of Void can grant 10 TV", () => {
+  const game = scenario();
+  game.players.blue.tv = 5;
+  assert.equal(buy(game, "hop"), null);
+  assert.equal(game.activeSide, "blue");
+  assert.equal(game.players.blue.tv, 0);
+  assert.equal(buy(game, "void"), null);
+  assert.equal(game.activeSide, "blue");
+  assert.equal(game.players.blue.tv, 10);
 });
 
 test("EMP temporarily cuts the outside power required by an activated Vanguard", () => {
@@ -257,6 +336,7 @@ test("Void deploys regular reserve Proxies for zero TV after its initial supply 
   assert.equal(game.players.blue.reserve, 0);
   assert.equal(game.stats.blue.tvSpent, 1);
   assert.equal(game.proxies[to].side, "blue");
+  assert(readyProxy(game, to));
 });
 
 test("Troop Disabler blocks next-turn rewards and leaves existing reserve available to deploy", () => {
@@ -285,6 +365,7 @@ test("Defensive Strike applies once to up to three distinct enemies in the playe
   const game = scenario();
   const cradleTargets = [45, 46, 47];
   for (const id of [...cradleTargets, 225]) placeProxy(game, id, "red");
+  game.proxies[45].fortified = true;
   const eligible = defensiveTargets(game, "blue");
   assert.deepEqual(eligible, cradleTargets);
   assert.equal(buy(game, "defensive"), null);
@@ -293,9 +374,12 @@ test("Defensive Strike applies once to up to three distinct enemies in the playe
   assert.match(action([45, 225]), /your territory/);
   assert.equal(game.players.blue.reserve, 0);
   assert.equal(action(eligible), null);
-  assert(eligible.every((id) => !game.proxies[id]));
+  assert.equal(game.proxies[45].side, "red");
+  assert.equal(game.proxies[45].fortified, true);
+  assert.equal(game.stats.red.hitsAbsorbed, 1);
+  assert([46, 47].every((id) => !game.proxies[id]));
   assert.equal(game.proxies[225].side, "red");
-  assert.equal(game.players.blue.reserve, 3);
+  assert.equal(game.players.blue.reserve, 2);
   assert.equal(game.players.blue.tv, 25);
 });
 

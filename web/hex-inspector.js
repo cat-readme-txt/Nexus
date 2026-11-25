@@ -13,11 +13,11 @@ export const NODE_ICONS = {
 const descriptions = {
   nexus: "Enter the enemy Nexus to win. Each powered Vanguard protects three approaches. Full protection requires both halves.",
   vanguard: "Pay 2 TV to fire up to three reachable hexes away with an active Proxy. Arming this Nexus shield half costs 2 TV and needs home shield support to come online.",
-  sentinel: "Capture for 3 TV (4 for Veyari) and activate its shield for 2 TV. An active Proxy on a controlled Obelisk can fire up to two reachable steps away for 1 TV (2 for Directorate).",
+  sentinel: "Base capture cost is 3 TV. Activate its shield for 2 TV. An active Proxy on a controlled Obelisk can fire up to two reachable steps for a base cost of 1 TV. Species fees apply before Ascension Tier III.",
   aegis: "Capture for free and activate its shield for 2 TV. With the Forward Deployment augment, a staffed and powered Aegis can deploy reserve Proxies to legal neighbors.",
   deposit: "Claim it to gain one reserve Proxy. Keep an active Proxy on a Deposit you control to buy augments.",
   cradle: "Place starting Proxies here or deploy from reserve. Deployed Proxies activate on your next turn.",
-  turbulence: "Veyari can phase jump from this terrain. Ascension bonuses are inactive here, and salvage caches can appear.",
+  turbulence: "Veyari can phase jump from this terrain, and salvage caches can appear. Move uses its usual range and cost here.",
   cache: "Enter this hex with a Proxy to collect one reserve Proxy at no extra TV.",
   territory: "Territory marks which side can use Defensive Strike against enemies here.",
 };
@@ -85,7 +85,7 @@ export function renderHexInspector(panel, game, id, region) {
   if (proxy) {
     const status = proxyReady(game, proxy) ? "Active" : "Activates on its owner’s next turn";
     add(`${sideName(proxy.side)} Proxy`, proxy.fortified ? `${status} · fortified` : status);
-    if (proxy.fortified) add("Armor", "Absorbs one ranged hit");
+    if (proxy.fortified) add("Fortification", "Invulnerable until its owner’s next action phase");
   } else {
     add("Proxies", "Empty");
   }

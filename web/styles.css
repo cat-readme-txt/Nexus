@@ -189,6 +189,7 @@ input {
 .swatch.red { color: #da7e81; background: #58303c; }
 .swatch.cradle { color: #81ac84; background: #294a43; }
 .swatch.captured { width: .6rem; height: .6rem; border: 2px solid #b5d2ff; border-radius: 50%; background: #294f99; }
+.swatch.fortified { color: #ffdb91; border-width: 2px; border-radius: .12rem .12rem .45rem .45rem; }
 .swatch.turbulence { color: #8d9baa; background: #344053; }
 .swatch.shield { width: 1rem; height: .25rem; border: none; background: #a88cff; }
 .swatch.shield.idle { height: 0; border-top: 2px dashed #a28acb; background: none; }
@@ -248,6 +249,18 @@ details form label { display: block; font-size: .88rem; margin-bottom: .28rem; }
 .team-resources strong { font-size: 1.08rem; font-variant-numeric: tabular-nums; }
 .team-card p { font-size: .83rem; margin-top: .15rem; }
 .team-card .team-effects { color: #eed09a; }
+.ascension-status {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  margin-top: .45rem;
+  padding-top: .42rem;
+  border-top: 1px solid var(--line);
+}
+.ascension-status canvas { width: 1.65rem; height: 1.65rem; flex: none; }
+.ascension-status strong, .ascension-status span { display: block; line-height: 1.3; }
+.ascension-status strong { color: #f1d694; font-size: .8rem; }
+.ascension-status span { color: var(--muted); font-size: .73rem; font-variant-numeric: tabular-nums; }
 .orders-panel > p { color: var(--muted); font-size: .92rem; margin-block: .38rem .7rem; }
 .command-group, .turn-actions { margin-block: .63rem 0; padding-top: .66rem; border-top: 1px solid var(--line); }
 .command-group h3 { font-size: .8rem; font-weight: 700; margin: 0 0 .45rem; color: var(--muted); }

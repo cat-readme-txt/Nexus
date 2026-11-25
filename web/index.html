@@ -131,6 +131,7 @@
         <span><i class="swatch cradle"></i>Cradle</span>
         <span><i class="swatch turbulence"></i>Turbulence</span>
         <span><i class="swatch captured"></i>Captured node</span>
+        <span id="fortification-key" hidden><i class="swatch fortified"></i>Fortified Proxy</span>
         <span><i class="swatch shield"></i>Shield up</span>
         <span><i class="swatch shield idle"></i>Shield down</span>
         <span id="linked-shield-key" hidden><i class="swatch shield linked"></i>Inspected links</span>
@@ -162,6 +163,10 @@
             </div>
             <p id="blue-proxies" class="muted"></p>
             <p id="blue-effects" class="team-effects" hidden></p>
+            <div class="ascension-status" id="blue-ascension" hidden>
+              <canvas id="blue-ascension-icon" width="52" height="52" aria-hidden="true"></canvas>
+              <div><strong id="blue-ascension-stage"></strong><span id="blue-ascension-rounds"></span></div>
+            </div>
           </section>
           <section class="panel team-card" data-side="red" id="red-team">
             <h3>Red</h3>
@@ -171,6 +176,10 @@
             </div>
             <p id="red-proxies" class="muted"></p>
             <p id="red-effects" class="team-effects" hidden></p>
+            <div class="ascension-status" id="red-ascension" hidden>
+              <canvas id="red-ascension-icon" width="52" height="52" aria-hidden="true"></canvas>
+              <div><strong id="red-ascension-stage"></strong><span id="red-ascension-rounds"></span></div>
+            </div>
           </section>
         </div>
 
@@ -232,6 +241,7 @@
             <option value="disc">Disc</option>
             <option value="drone">Drone</option>
             <option value="classic">Classic shield</option>
+            <option value="void-erosion" hidden>Void Erosion</option>
           </select>
         </label>
         <p id="proxy-design-help" class="settings-hint muted"></p>
@@ -266,27 +276,30 @@
         <summary>Background</summary>
         <p>Humanity depends on AI when it discovers hostile powers beyond Earth. With little intelligence and no agreement on how to respond, the world's governments turn their supercomputers over to their most advanced AI. It simulates possible wars, including conflicts between the alien powers. Each match is one of those simulations.</p>
       </details>
-      <p><strong>TV stands for teravolts.</strong> Recharge 3 TV plus 1 TV per active Proxy, up to 40 TV or 20 TV with The Call of Void. Each side has three minutes to act. The turn number advances after both sides finish.</p>
+      <p><strong>TV stands for teravolts.</strong> Each side starts its action phase with 3 TV plus 1 TV per active Proxy. Human Directorate gains 3 more TV with at least one staffed Deposit it controls. The recharge cap is 40 TV, 50 TV for the Directorate at Ascension Tier III, or 20 TV with The Call of Void. Capacitor Overload adds banked TV after recharge. Unspent TV clears at handoff.</p>
+      <p>Each side has three minutes to act. The turn number advances after both sides finish.</p>
       <dl class="rule-actions">
-        <div><dt>Move · 1 TV</dt><dd>Enter an adjacent hex. Landing on an enemy Proxy removes it immediately and earns one reserve Proxy. Enemy shields and your own Proxies block movement.</dd></div>
-        <div><dt>Deploy · base cost 1 TV</dt><dd>Place a reserve Proxy on any empty Cradle hex, including Obelisks. It activates next turn. The Call of Void makes all deployments free.</dd></div>
+        <div><dt>Move · 1 TV</dt><dd>Enter an adjacent hex. Landing on an unprotected enemy Proxy captures it and earns one reserve Proxy. Enemy shields, fortified enemies, and friendly Proxies block movement.</dd></div>
+        <div><dt>Deploy · base cost 1 TV</dt><dd>Place a reserve Proxy on any empty Cradle hex, including Obelisks. It activates next turn. With The Call of Void, deployments are free and arrive active.</dd></div>
       </dl>
       <dl class="rule-nodes">
         <div><img src="./assets/nexus.png" alt=""><div><dt>Nexus</dt><dd>Enter the enemy Nexus to win.</dd></div></div>
         <div><img src="./assets/vanguard.png" alt=""><div><dt>Vanguard</dt><dd>Fire up to three reachable steps away for 2 TV with an active Proxy here. Pay 2 TV to arm one half of the Nexus shield. Fully protect the Nexus by arming and staffing both Vanguards. Each half needs an online home Aegis or Obelisk clear of enemies.</dd></div></div>
-        <div><img src="./assets/sentinel.png" alt=""><div><dt>Sentinel Obelisk</dt><dd>Capture for 3 TV (4 for Veyari). An active Proxy on an Obelisk you control can fire up to two reachable steps away for 1 TV (2 for Directorate). This includes captured Obelisks.</dd></div></div>
+        <div><img src="./assets/sentinel.png" alt=""><div><dt>Sentinel Obelisk</dt><dd>Capture for a base cost of 3 TV. An active Proxy on an Obelisk you control can fire up to two reachable steps away for a base cost of 1 TV. This includes captured Obelisks. Species fees apply before Ascension Tier III.</dd></div></div>
         <div><img src="./assets/aegis.png" alt=""><div><dt>Aegis</dt><dd>Capture for 0 TV. A powered Aegis you control can deploy Proxies with the Forward Deployment augment.</dd></div></div>
         <div><img src="./assets/deposit.png" alt=""><div><dt>Deposit</dt><dd>Occupy for 3 TV to add one Proxy to your reserve.</dd></div></div>
       </dl>
       <p>Occupied special hexes show an inlay around the Proxy. Look for a crown on a Nexus, side brackets on a Vanguard, pointed chevrons on an Obelisk, flat bars on an Aegis, or a gold ring on a Deposit. A colored dot shows who captured or claimed a node. Select any hex to see its rules and occupants.</p>
       <p>Fabricate a reserve Proxy for 2 TV with fewer than two active Proxies, once every three turns. Every third full turn, two salvage caches can surface on empty Turbulence hexes, one per half of the board. A Proxy entering a cache hex automatically adds one reserve Proxy at no extra TV unless Troop Disabler blocks the pickup.</p>
       <p>All shields start offline. Select an active Proxy on a generator you control and pay 2 TV to activate its shield. Aegis and Obelisk shields stay active when your Proxy leaves. Capture resets and reverses the arc. The first powered shield on a shared edge keeps it while active.</p>
-      <p>Solid borders are powered. Dashed borders show offline shields. Gold segments around a Nexus mark its shielded approaches. A small gold hexagon around a Proxy marks Keth armor, which absorbs one Obelisk, Vanguard, or Defensive Strike hit.</p>
+      <p>Solid borders are powered. Dashed borders show offline shields. Gold segments around a Nexus mark its shielded approaches. A segmented gold shield around a Proxy shows it is invulnerable until its owner’s next action phase.</p>
       <p>Buy <strong>Forward Deployment</strong> for 5 TV. An active Proxy on a powered Aegis can deploy to any legal empty neighbor for 1 TV and one reserve. It can deploy repeatedly from the same Aegis.</p>
       <p>Cradles keep their original size and owners. Every other hex starts as Turbulence. Activate a generator in or beside your Cradle to seed territory, then grow it through linked activations, captures, and Deposit claims. Each connected node claims its one-hex ring and links to your nearest region. Shared hexes in opposing rings stay Turbulence even with both shields offline. Enclosed pockets with no special node can join the surrounding region. Keep a Proxy on a claimed Deposit until your next turn to secure it.</p>
       <p>Species abilities are explained when you choose. Board effects are visible, and the match review reveals both picks.</p>
       <p>Hold a Deposit with an active Proxy to buy augments. Use a purchased augment on one of your turns, even if you later lose the Deposit.</p>
-      <p>Buying Hop unlocks it for the match. Select an active Proxy and look for violet diamonds. Pick one or more landings, then confirm the entire chain for 1 TV. Each enemy Proxy you jump over is captured.</p>
+      <p>Buying Hop unlocks it for the match. Select an active Proxy and look for violet diamonds. Pick one or more landings, then confirm the chain for 1 TV. Hop captures unprotected enemy Proxies you jump over or land on. Friendly Proxies and fortified enemies block landings.</p>
+      <p>The Call of Void adds 10 TV immediately and locks your team to Void Erosion. It ends Ascension and restores your species’ base rules. When Ascension is active, its badge on your team card counts completed rounds since activation. The emblem changes at tiers I, II, and III on your 6th, 12th, and 18th action phases.</p>
+      <p>At Ascension Tier III, the Directorate recharges up to 50 TV and pays 1 TV for Obelisk fire. Veyari can Phase Jump repeatedly for 2 TV per jump and pay 3 TV for occupation. Keth can fortify any number of active Proxies anywhere for 2 TV each and deploy in the Cradle for 1 TV per Proxy.</p>
       <p class="muted">Use Q, W, E, A, S, and D to move around the board with a keyboard. Enter selects a hex.</p>
     </div>
   </dialog>
