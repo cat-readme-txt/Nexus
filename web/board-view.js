@@ -1,13 +1,14 @@
-import { board, nexus, SIDES, sideName, tileLabel, tileName, tiles, vanguards, walls, wallsBySource } from "./board.js";
+import {
+  board, nexus, nexusWalls, nexusWallsByEdge, sideName, tileLabel, tileName, tiles, wallsByEdge,
+} from "./board.js";
 import { NODE_ICONS } from "./hex-inspector.js";
 import { DEFAULT_PROXY_SKIN } from "./proxy-skins.js";
-import { baseShieldActive, nodeController, proxyReady, shieldController } from "./rules.js";
+import { nodeController, poweredBorder, proxyReady, wallActive } from "./rules.js";
 
 export const IMPACT_MS = 220;
 const RADIUS = 25;
 const HEIGHT = Math.sqrt(3) * RADIUS;
 const PAD = 17;
-const SHIELD_SOURCES = [...wallsBySource.keys()];
 const WIDTH = 2 * PAD + 2 * RADIUS + 24 * 1.5 * RADIUS;
 const MAP_HEIGHT = 2 * PAD + 14 * HEIGHT;
 const POINTS = [[1, 0], [.5, Math.sqrt(3) / 2], [-.5, Math.sqrt(3) / 2],
@@ -233,7 +234,7 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
     ctx.restore();
   }
 
-  function drawWall({ from, to, side }, controller, linked) {
+  function drawWall({ from, to, side }, active, linked) {
     const a = centers.get(from);
     const b = centers.get(to);
     const x = (a.x + b.x) / 2;
@@ -244,7 +245,18 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
     ctx.beginPath();
     ctx.moveTo(x - dx, y - dy);
     ctx.lineTo(x + dx, y + dy);
-    drawShield(team[controller ?? side].wall, !!controller, linked);
+    drawShield(team[side].wall, active, linked);
+  }
+
+  function drawNexusWall({ from, direction }, active, linked) {
+    const { x, y } = centers.get(from);
+    const radius = RADIUS * .85;
+    const [ax, ay] = POINTS[(direction + 4) % 6];
+    const [bx, by] = POINTS[(direction + 5) % 6];
+    ctx.beginPath();
+    ctx.moveTo(x + ax * radius, y + ay * radius);
+    ctx.lineTo(x + bx * radius, y + by * radius);
+    drawShield("#ffdc90", active, linked);
   }
 
   function drawShield(color, active, linked = false) {
@@ -322,17 +334,17 @@ export function createBoardView(canvas, viewport, chooseTile, previewAction) {
       ctx.setTransform(canvas.width / WIDTH, 0, 0, canvas.height / MAP_HEIGHT, 0, 0);
       ctx.clearRect(0, 0, WIDTH, MAP_HEIGHT);
       for (const tile of board) drawTile(tile);
-      const node = tiles.get(inspected)?.node;
-      const inspectedBase = node?.type === "nexus" || node?.type === "vanguard" ? node.home : null;
-      const controllers = new Map(SHIELD_SOURCES.map((source) => [source, game ? shieldController(game, source) : null]));
-      for (const wall of walls) {
-        const linked = wall.source === inspected || (wall.side === inspectedBase && vanguards[wall.side].includes(wall.source));
-        drawWall(wall, controllers.get(wall.source), linked);
+      const linked = ({ source, side }) => source === inspected
+        || (nexus[side] === inspected && tiles.get(source).node.type === "vanguard");
+      for (const [edge, borders] of wallsByEdge) {
+        const powered = game ? poweredBorder(game, edge) : null;
+        if (powered && powered === nexusWallsByEdge.get(edge)) continue;
+        const visible = borders.filter(({ source, side }) => side === (game ? nodeController(game, source) : tiles.get(source).node.home));
+        const wall = powered ?? visible.find(linked) ?? visible[0];
+        if (wall) drawWall(wall, !!powered, linked(wall));
       }
-      for (const side of SIDES) {
-        const { x, y } = centers.get(nexus[side]);
-        hex(x, y, RADIUS * .85);
-        drawShield("#ffdc90", game && baseShieldActive(game, side), side === inspectedBase);
+      for (const wall of nexusWalls) {
+        drawNexusWall(wall, !!game && wallActive(game, wall), linked(wall));
       }
       drawPlan();
       drawImpacts(time);

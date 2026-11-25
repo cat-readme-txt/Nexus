@@ -65,7 +65,7 @@ The flat-top competition map has **337 playable hexes**, with columns A–Y and 
 | Hex | Symbol when empty | Inlay while occupied | What it does |
 | --- | --- | --- | --- |
 | **Nexus** | Crown | Gold crown ridge | Enter the enemy Nexus to win. The Vanguard shield can protect all its approaches. |
-| **Vanguard** | Sword and shield | Amber side brackets | Pay 2 TV with an active Proxy here to arm the Nexus ring and inward Cradle borders. An armed Vanguard needs an active friendly Proxy on it and at least one online home Aegis or Obelisk free of enemy Proxies. Enemy Proxies cannot enter a Vanguard. |
+| **Vanguard** | Sword and shield | Amber side brackets | Pay 2 TV with an active Proxy here to arm this half of the Nexus ring and its inward Cradle borders. An armed Vanguard needs an active friendly Proxy on it and at least one online home Aegis or Obelisk clear of enemy Proxies. Enemy Proxies cannot enter a Vanguard. |
 | **Sentinel Obelisk** | Paired triangles | Lilac chevrons | Pay 2 TV to activate its linked outward borders. An active Proxy on a controlled home Obelisk can fire. |
 | **Aegis** | Gold hexagon | Two flat gold bars | Capture for free and pay 2 TV to activate its linked borders. The Forward Deployment augment lets a staffed, powered Aegis deploy reserve Proxies. |
 | **Deposit** | Gold ring | Gold ring | Grants one reserve Proxy when first occupied or taken from the opponent. An active Proxy on a Deposit you control lets you buy augments and triggers Directorate supply at the start of its turn. |
@@ -73,11 +73,13 @@ The flat-top competition map has **337 playable hexes**, with columns A–Y and 
 | **Turbulence** | Gray terrain | Gray terrain | Veyari can phase jump from here. A Move starting here loses all Ascension bonuses. Salvage caches can surface here. |
 | **Salvage cache** | Teal crate | Teal diamond | Spend 2 TV with an active Proxy on the cache to recover one reserve Proxy and remove the cache. |
 
-All **251 printed borders** and both Nexus rings start offline. The Vanguards control the inward Cradle borders and Nexus ring. The Aegis and Obelisk field shields follow their complete outward arcs, including the return edges. Some arcs extend around four neighboring hexes, including the Blue arc from E1 through F2 and the Red arc from U13 through T13.
+All **251 printed borders** and both Nexus rings start offline. Each Vanguard powers its own inward Cradle borders and three approaches to the Nexus. A full ring needs both Vanguards armed and staffed. Aegis and Obelisk field shields follow their outward arcs, including the return edges. Some arcs extend around four neighboring hexes, including the Blue arc from E1 through F2 and the Red arc from U13 through T13.
 
-Solid borders are powered. Brighter dashed borders show the same outline while offline. Select a generator to give its own links a pale outline and see their status in the hex inspector. A solid gold ring around a Nexus means its Vanguard shield is active. A small gold hexagon around an individual Proxy means it has armor. Gold terrain inlays identify occupied special hexes.
+Solid borders are powered. Dashed borders show where an offline shield would appear. Select a generator to outline its own borders and see their status in the hex inspector. Solid gold segments around a Nexus mark which approaches are shielded. A small gold hexagon around an individual Proxy means it has armor. Gold terrain inlays identify occupied special hexes.
 
-Select an active friendly Proxy on a generator you control and choose **Activate shield**. An Aegis or Obelisk stays powered after your Proxy leaves. Capturing a generator changes its controller and resets its shield activation. The new controller can pay to power it again. An enemy Proxy standing on a home generator prevents that generator from supporting its original side’s Vanguard shield. A Vanguard stays armed after a friendly Proxy leaves and resumes protection when staffed again with outside power available.
+Select an active friendly Proxy on a generator you control and choose **Activate shield**. An Aegis or Obelisk stays powered after your Proxy leaves. Capture resets the activation and rotates the arc 180° toward the new controller’s opponent. The rotated arc uses only playable edges. On a shared edge, the first activated shield has priority while it is powered. Retaking a home generator restores the original arc, ready for activation.
+
+An enemy Proxy standing on a home generator prevents it from supporting that side’s Vanguard shields. An armed Vanguard’s half switches off when its Proxy leaves and comes back when staffed again with outside power available.
 
 Paying to **Occupy** a Deposit gives the reserve reward immediately. The pending claim counts as control, so a staffed claimant can buy augments that turn. A friendly Proxy must be on the Deposit at the start of your next turn to secure the claim. If the claim is denied, the previous controller regains it or it goes neutral again. You keep any reserve award already received.
 
@@ -86,6 +88,8 @@ Paying to **Occupy** a Deposit gives the reserve reward immediately. The pending
 Territory expands through links between special hexes. Each Turbulence Deposit links to the closest special hex on each side. For example, **M7 links to J9 and P6**. Within each side, two special hexes link if there is no third special hex closer to both. Inspect a special hex to see its links.
 
 A captured node extends your region when one of its links reaches a home node you still control or an earlier connected capture. The new territory includes the captured hex, its one-hex ring, and a shortest connection from that ring to your nearest existing territory. This can include ordinary hexes outside both rings. Blue can capture the J9 Obelisk without owning M7, but its region expands there once it has the connected Deposit. Losing that link can cut off the expansion while leaving the captured node under your control.
+
+When growth encloses a pocket without a special node, that pocket joins the surrounding side’s territory. The board edge can close a pocket. A pocket containing a special node keeps its territory until the usual capture rules change it. Breaking an enclosing link can reopen a pocket.
 
 The board shows current territory in team colors, and **Defensive Strike** uses those boundaries. A denied Deposit claim rolls back its expansion. Capturing territory preserves terrain features such as Turbulence and the printed Cradle deployment zones.
 

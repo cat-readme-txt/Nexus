@@ -63,7 +63,7 @@ const orderDescriptions = {
   fabricate: "Build one reserve Proxy. Available once every three of your turns with fewer than two active Proxies.",
   forward: "Deploy one reserve Proxy beside this powered Aegis. You can deploy again when you have a legal hex, reserve and TV.",
   salvage: "Recover one reserve Proxy and remove this salvage cache.",
-  occupy: "Take control of this generator. Its linked shields go offline until you activate them.",
+  occupy: "Take control of this generator. Its offline shield arc turns to face your opponent.",
   "power-shield": "Power this node’s linked shields. They stay active when your Proxy moves away.",
   fire: "Show reachable hexes up to two steps away, then choose an enemy Proxy to fire on.",
   fortify: "Absorb one ranged hit. Armor expires when this Proxy moves or your next turn starts.",
@@ -539,7 +539,7 @@ function renderMatch() {
     let description;
     if (type === "occupy" && deposit) description = "Claim this Deposit and gain a reserve Proxy. Staff it at the start of your next turn to secure the claim.";
     if (type === "power-shield" && nodeType === "vanguard") {
-      description = "Arm the Nexus shield. It needs an active Proxy here and an online home Aegis or Obelisk.";
+      description = "Arm this half of the Nexus shield. It needs an active Proxy here and an online home Aegis or Obelisk.";
     }
     renderOrderControl(id, orderError ?? command.error, description);
   }

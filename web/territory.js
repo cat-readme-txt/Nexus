@@ -47,13 +47,14 @@ export const specialHexLinks = buildSpecialLinks();
 
 const initialRegions = new Map(board.filter(({ region }) => SIDES.includes(region)).map(({ id, region }) => [id, region]));
 
-function connectToRegion(regions, side, footprint) {
+function regionConnection(regions, side, footprint) {
   const queue = [...footprint];
   const previous = new Map(footprint.map((id) => [id, null]));
   for (const id of queue) {
     if (regions.get(id) === side) {
-      for (let link = id; link !== null; link = previous.get(link)) regions.set(link, side);
-      return;
+      const path = [];
+      for (let link = previous.get(id); link !== null; link = previous.get(link)) path.push(link);
+      return path;
     }
     for (const neighbor of tiles.get(id).neighbors) {
       if (neighbor === null || previous.has(neighbor) || tiles.get(neighbor).node) continue;
@@ -61,12 +62,38 @@ function connectToRegion(regions, side, footprint) {
       queue.push(neighbor);
     }
   }
+  return [];
+}
+
+function enclosedHexes(regions, side, growth) {
+  const boundary = [...growth].filter((id) => regions.get(id) === side)
+    .flatMap((id) => tiles.get(id).neighbors);
+  const visited = new Set();
+  const enclosed = [];
+  for (const start of boundary) {
+    if (start === null || visited.has(start) || regions.get(start) === side) continue;
+    const pocket = [start];
+    visited.add(start);
+    let hasNode = false;
+    for (const id of pocket) {
+      const tile = tiles.get(id);
+      if (tile.node) hasNode = true;
+      for (const neighbor of tile.neighbors) {
+        if (neighbor === null || visited.has(neighbor) || regions.get(neighbor) === side) continue;
+        visited.add(neighbor);
+        pocket.push(neighbor);
+      }
+    }
+    if (!hasNode) enclosed.push(...pocket);
+  }
+  return enclosed;
 }
 
 export function territoryMap(game) {
   const regions = new Map(initialRegions);
   const controllers = new Map(nodes.map(({ id }) => [id, nodeController(game, id)]));
   const connected = new Set(nodes.filter(({ id, node }) => node.home && controllers.get(id) === node.home).map(({ id }) => id));
+  const growth = { blue: new Set(), red: new Set() };
   const claims = [];
   for (const { id } of nodes) {
     const claim = game.claims[id];
@@ -84,9 +111,17 @@ export function territoryMap(game) {
     const [{ id, side }] = claims.splice(index, 1);
     const footprint = [id, ...tiles.get(id).neighbors.filter((neighbor) => neighbor !== null
       && (!tiles.get(neighbor).node || controllers.get(neighbor) === side))];
-    connectToRegion(regions, side, footprint);
-    for (const tile of footprint) regions.set(tile, side);
+    footprint.push(...regionConnection(regions, side, footprint));
+    for (const tile of footprint) {
+      regions.set(tile, side);
+      growth[side].add(tile);
+    }
     connected.add(id);
+  }
+  // Test the final boundaries so cutting a link can also reopen a pocket.
+  const pockets = SIDES.map((side) => enclosedHexes(regions, side, growth[side]));
+  for (const [index, side] of SIDES.entries()) {
+    for (const id of pockets[index]) regions.set(id, side);
   }
   return regions;
 }

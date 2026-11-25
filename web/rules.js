@@ -2,8 +2,8 @@ import { AUGMENT_BY_ID } from "./augments.js";
 import { speciesById, speciesOf } from "./species.js";
 import { nodeController, territoryMap } from "./territory.js";
 import {
-  cradles, edgeKey, nexus, nodes, otherSide, sideName, SIDES,
-  tileLabel, tileName, tiles, vanguards, wallsByEdge,
+  cradles, edgeKey, mirroredWallsBySource, nexus, nexusWalls, nexusWallsByEdge, nodes, otherSide,
+  sideName, SIDES, tileLabel, tileName, tiles, wallsByEdge, wallsBySource,
 } from "./board.js";
 
 export { nodeController };
@@ -125,8 +125,14 @@ function isFieldGenerator(node) {
   return node?.type === "aegis" || node?.type === "sentinel";
 }
 
+function shieldActivation(game, id) {
+  const activation = game.activatedShields?.[id];
+  // Existing matches only stored the activating team.
+  return typeof activation === "string" ? { side: activation, at: 0 } : activation;
+}
+
 function fieldShieldController(game, id) {
-  const side = game.activatedShields?.[id];
+  const side = shieldActivation(game, id)?.side;
   if (!side || nodeController(game, id) !== side || shieldsJammed(game, side)) return null;
   return side;
 }
@@ -136,14 +142,19 @@ function hasVanguardSupport(game, side) {
   return FIELD_GENERATORS[side].some((id) => game.proxies[id]?.side !== enemy && fieldShieldController(game, id) === side);
 }
 
+function staffedVanguard(game, id, side) {
+  return shieldActivation(game, id)?.side === side && game.proxies[id]?.side === side && readyProxy(game, id);
+}
+
 export function baseShieldActive(game, side) {
-  return vanguards[side].some((id) => game.activatedShields?.[id] === side
-    && game.proxies[id]?.side === side && readyProxy(game, id)) && hasVanguardSupport(game, side);
+  return nexusWalls.every((wall) => wall.side !== side || wallActive(game, wall));
 }
 
 export function shieldController(game, id) {
   const node = tiles.get(id)?.node;
-  if (node?.type === "vanguard") return baseShieldActive(game, node.home) ? node.home : null;
+  if (node?.type === "vanguard") {
+    return staffedVanguard(game, id, node.home) && hasVanguardSupport(game, node.home) ? node.home : null;
+  }
   if (isFieldGenerator(node)) return fieldShieldController(game, id);
   return null;
 }
@@ -152,14 +163,33 @@ export function shieldSourceActive(game, id) {
   return !!shieldController(game, id);
 }
 
+export function shieldWallsForSource(game, id) {
+  const home = tiles.get(id)?.node?.home;
+  if (!home) return [];
+  const arcs = nodeController(game, id) === home ? wallsBySource : mirroredWallsBySource;
+  return arcs.get(id) ?? [];
+}
+
+export function poweredBorder(game, edge) {
+  const ring = nexusWallsByEdge.get(edge);
+  let powered = ring && shieldController(game, ring.source) === ring.side ? ring : null;
+  let earliest = powered ? shieldActivation(game, powered.source).at : Infinity;
+  for (const wall of wallsByEdge.get(edge) ?? []) {
+    const activation = shieldActivation(game, wall.source);
+    if (!activation || activation.at >= earliest || shieldController(game, wall.source) !== wall.side) continue;
+    powered = wall;
+    earliest = activation.at;
+  }
+  return powered;
+}
+
 export function wallActive(game, wall) {
-  return shieldSourceActive(game, wall.source);
+  const powered = poweredBorder(game, edgeKey(wall.from, wall.to));
+  return !!powered && powered.source === wall.source && powered.side === wall.side;
 }
 
 function shieldBetween(game, side, from, to) {
-  const enemy = otherSide(side);
-  if ((from === nexus[enemy] || to === nexus[enemy]) && baseShieldActive(game, enemy)) return true;
-  return wallsByEdge.get(edgeKey(from, to))?.some(({ source }) => shieldController(game, source) === enemy) ?? false;
+  return poweredBorder(game, edgeKey(from, to))?.side === otherSide(side);
 }
 
 function reachableEdge(game, side, from, to) {
@@ -473,7 +503,7 @@ export function nodeOrders(game, from) {
   if (generator || node === "vanguard") {
     let blocker = null;
     if (!controlled) blocker = "Take control of this hex to activate its shield.";
-    else if (game.activatedShields?.[from] === side) {
+    else if (shieldActivation(game, from)?.side === side) {
       blocker = node === "vanguard" && !hasVanguardSupport(game, side)
         ? "Activated. It needs at least one online home Aegis or Obelisk to protect the Nexus."
         : "This shield has already been activated.";
@@ -782,7 +812,7 @@ function perform(game, side, { type, from, to, cost, refund }) {
       claimNode(game, to, side);
       return;
     case "power-shield":
-      (game.activatedShields ??= {})[to] = side;
+      (game.activatedShields ??= {})[to] = { side, at: game.revision + 1 };
       record(game, side, "shieldsActivated");
       log(game, `${name} activated the shield at ${tileLabel(to)}.`);
       return;

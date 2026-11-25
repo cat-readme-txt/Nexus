@@ -23,17 +23,19 @@ export const board = TERRAIN_ROWS.flatMap((row, r) => Array.from(row, (code, c) 
 
 export const tiles = new Map(board.map((tile) => [tile.id, tile]));
 
+function playableId(column, row) {
+  if (column < 0 || column >= columns || row < 0) return null;
+  const id = idAt(column, row);
+  return tiles.has(id) ? id : null;
+}
+
 // Neighbor indices run clockwise from north, matching the board artwork.
 for (const tile of board) {
   const { column: c, row: r } = tile;
   const upper = r - c % 2;
   const offsets = [[c, r - 1], [c + 1, upper], [c + 1, upper + 1],
     [c, r + 1], [c - 1, upper + 1], [c - 1, upper]];
-  tile.neighbors = offsets.map(([column, row]) => {
-    if (column < 0 || column >= columns || row < 0) return null;
-    const id = idAt(column, row);
-    return tiles.has(id) ? id : null;
-  });
+  tile.neighbors = offsets.map(([column, row]) => playableId(column, row));
 }
 
 export const cradles = Object.fromEntries(SIDES.map((side) => [
@@ -50,17 +52,49 @@ for (const { id, node } of nodes) {
 }
 
 export const edgeKey = (a, b) => a < b ? `${a}:${b}` : `${b}:${a}`;
+
+export const nexusWalls = SIDES.flatMap((side) => {
+  const from = nexus[side];
+  // Both pairs appear west-to-east in NODE_LAYOUT.
+  const [west, east] = vanguards[side];
+  return tiles.get(from).neighbors.map((to, direction) => ({
+    from, to, direction, side, source: direction >= 1 && direction <= 3 ? east : west,
+  }));
+});
+export const nexusWallsByEdge = new Map(nexusWalls.map((wall) => [edgeKey(wall.from, wall.to), wall]));
+
 export const walls = SHIELD_LAYOUT.map(([from, to, source]) => ({
   from, to, source, side: tiles.get(source).node.home,
 }));
 export const wallsByEdge = new Map();
 export const wallsBySource = new Map();
-for (const wall of walls) {
+export const mirroredWallsBySource = new Map();
+
+function indexWall(wall, bySource) {
   const key = edgeKey(wall.from, wall.to);
   if (!wallsByEdge.has(key)) wallsByEdge.set(key, []);
   wallsByEdge.get(key).push(wall);
-  if (!wallsBySource.has(wall.source)) wallsBySource.set(wall.source, []);
-  wallsBySource.get(wall.source).push(wall);
+  if (!bySource.has(wall.source)) bySource.set(wall.source, []);
+  bySource.get(wall.source).push(wall);
+}
+
+function oppositeHex(pivot, id) {
+  const center = tiles.get(pivot);
+  const tile = tiles.get(id);
+  // Odd columns sit half a row up, so rotating the edge also reflects that offset.
+  const row = 2 * center.row - tile.row + tile.column % 2 - center.column % 2;
+  return playableId(2 * center.column - tile.column, row);
+}
+
+for (const wall of walls) indexWall(wall, wallsBySource);
+for (const { from, to, source, side } of walls) {
+  const { type } = tiles.get(source).node;
+  if (type !== "aegis" && type !== "sentinel") continue;
+  const mirroredFrom = oppositeHex(source, from);
+  const mirroredTo = oppositeHex(source, to);
+  if (mirroredFrom !== null && mirroredTo !== null) {
+    indexWall({ from: mirroredFrom, to: mirroredTo, source, side: otherSide(side) }, mirroredWallsBySource);
+  }
 }
 
 export const NODE_NAMES = {

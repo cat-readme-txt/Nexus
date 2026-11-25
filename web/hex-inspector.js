@@ -1,5 +1,5 @@
-import { sideName, tileLabel, tileName, tiles, vanguards, wallsBySource } from "./board.js";
-import { ACTION_COST, baseShieldActive, nodeController, proxyReady, shieldSourceActive } from "./rules.js";
+import { nexusWalls, sideName, tileLabel, tileName, tiles } from "./board.js";
+import { ACTION_COST, nodeController, proxyReady, shieldWallsForSource, wallActive } from "./rules.js";
 import { specialHexLinks } from "./territory.js";
 
 export const NODE_ICONS = {
@@ -11,8 +11,8 @@ export const NODE_ICONS = {
 };
 
 const descriptions = {
-  nexus: "Enter the enemy Nexus to win. A powered Vanguard shield protects it.",
-  vanguard: "Pay 2 TV with an active friendly Proxy here to arm the Nexus shield. Keep an active Proxy on an armed Vanguard and at least one home Aegis or Obelisk online to protect the Nexus.",
+  nexus: "Enter the enemy Nexus to win. Each powered Vanguard protects three approaches. Full protection requires both halves.",
+  vanguard: "Pay 2 TV to arm this half of the Nexus shield. It needs an active friendly Proxy here and an online home Aegis or Obelisk clear of enemies.",
   sentinel: "Activate its linked field shield for 2 TV. Base capture cost is 3 TV. Home Obelisk fire costs 1 TV before modifiers and reaches up to two hexes.",
   aegis: "Capture for free and activate its shield for 2 TV. With the Forward Deployment augment, a staffed and powered Aegis can deploy reserve Proxies to legal neighbors.",
   deposit: "Claim it to gain one reserve Proxy. Keep an active Proxy on a Deposit you control to buy augments.",
@@ -62,15 +62,21 @@ export function renderHexInspector(panel, game, id, region) {
     add("Control", controller ? `${sideName(controller)}${pending ? " · claim pending" : ""}` : "Unclaimed");
     const links = specialHexLinks.get(id);
     if (links.length) add("Territory links", links.map(tileLabel).join(" · "));
-    if (kind === "aegis" || kind === "sentinel") {
-      add("Shield borders", `${wallsBySource.get(id)?.length ?? 0} linked · ${shieldSourceActive(game, id) ? "Online" : "Offline"}`);
-    }
-    if (kind === "aegis" || kind === "sentinel" || kind === "vanguard") {
+    const fieldGenerator = kind === "aegis" || kind === "sentinel";
+    if (fieldGenerator || kind === "vanguard") {
+      const borders = shieldWallsForSource(game, id);
+      const powered = borders.filter((wall) => wallActive(game, wall)).length;
+      const status = powered === 0 ? "Offline" : powered === borders.length ? "Online" : "Partial";
+      add(kind === "vanguard" ? "Inward borders" : "Shield borders", `${status} · ${powered}/${borders.length} powered`);
+      if (fieldGenerator && controller !== tile.node.home) add("Shield direction", "Mirrored toward the opposing side");
       add("Activation", game.activatedShields?.[id] ? "Activated" : `${ACTION_COST.shield} TV`);
     }
     if (kind === "nexus" || kind === "vanguard") {
-      const linked = vanguards[tile.node.home].reduce((count, source) => count + (wallsBySource.get(source)?.length ?? 0), 0);
-      add("Nexus shield", `${baseShieldActive(game, tile.node.home) ? "Online" : "Offline"} · ${linked} inward borders`);
+      const approaches = nexusWalls.filter(({ side, source }) => side === tile.node.home && (kind === "nexus" || source === id));
+      const powered = approaches.filter((wall) => wallActive(game, wall)).length;
+      const status = powered === 0 ? "Offline" : powered === approaches.length ? "Online" : "Partial";
+      add(kind === "nexus" ? "Nexus shield" : "Shield half", `${status} · ${powered}/${approaches.length} approaches`);
+      if (kind === "vanguard") add("Nexus approaches", approaches.map(({ to }) => tileLabel(to)).join(" · "));
     }
   }
   const proxy = game.proxies[id];
